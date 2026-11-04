@@ -113,16 +113,14 @@ export function maskUsingChunks(
     )) {
       if (seen.has(span.value)) continue;
       seen.add(span.value);
-      let from = 0;
-      let start: number;
-      while ((start = value.indexOf(span.value, from)) >= 0) {
+      const escaped = span.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      for (const match of value.matchAll(new RegExp(escaped, 'giu'))) {
         annotations.push({
           field_type: span.field_type,
-          start,
-          end: start + span.value.length,
+          start: match.index,
+          end: match.index + match[0].length,
           complete: true,
         });
-        from = start + span.value.length;
       }
     }
   return maskPII(value, allowedValues, annotations);

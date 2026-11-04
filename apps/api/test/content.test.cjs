@@ -60,3 +60,18 @@ test('shared UI answer mocks conform to the real answer contract', () => {
   for (const answer of Object.values(mocks.answers))
     assert.equal(answerInput.safeParse(answer).success, true);
 });
+
+test('tagged values remain masked when an agent changes their capitalization', () => {
+  const { maskUsingChunks } = require('../dist/knowledge/content');
+  const content = 'Demo Private Person';
+  const chunk = {
+    content,
+    personalDataSpans: [
+      { field_type: 'NAME', start: 0, end: content.length, complete: true },
+    ],
+  };
+  assert.equal(
+    maskUsingChunks('DEMO PRIVATE PERSON', [chunk]),
+    '[REDACTED_NAME]',
+  );
+});
