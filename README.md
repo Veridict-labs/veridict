@@ -1,6 +1,8 @@
 # Veridict
 
-A starter monorepo for the Knowledge Guardian frontend and backend. Application features, domain models, authentication, and WorkBuddy/MCP integration have yet to be implemented.
+A monorepo for Knowledge Guardian. The NestJS backend implements organization-scoped authentication, permissions, ingestion, retrieval, policy resolution, inquiry history, reviewed feedback, audit logs, and an authenticated MCP endpoint. The Next.js frontend remains a starter for Person 3.
+
+WorkBuddy orchestration and the embedding provider remain integration tasks for Person 1. A new inquiry stays pending until an external agent submits an answer.
 
 ## Stack
 
@@ -19,15 +21,29 @@ A starter monorepo for the Knowledge Guardian frontend and backend. Application 
 Run these commands from the project root in PowerShell:
 
 ```powershell
-npm install
+npm ci
 Copy-Item .env.example .env
 Copy-Item apps/web/.env.example apps/web/.env.local
 Copy-Item apps/api/.env.example apps/api/.env
 npm run db:up
+npm run db:deploy
+npm run build
 npm run dev
 ```
 
-Frontend: http://localhost:3000. Backend: http://localhost:3001 (the default `Hello World!` response). Both applications can run without a database while the starter does not use it.
+Frontend: http://localhost:3000. API: http://localhost:3001. Public liveness check: `GET /health`. The API requires PostgreSQL and applied migrations. The frontend can run independently with `npm run dev:web`.
+
+On the first setup, create an administrator using a separate PowerShell terminal:
+
+```powershell
+$env:BOOTSTRAP_ORG_SLUG = 'veridict'
+$env:BOOTSTRAP_EMAIL = 'admin@example.com'
+$env:BOOTSTRAP_PASSWORD = Read-Host 'Choose a password (at least 12 characters)' -MaskInput
+npm run admin:bootstrap
+Remove-Item Env:BOOTSTRAP_PASSWORD
+```
+
+The bootstrap command creates a new organization and administrator; an existing slug is rejected. There are no default accounts or public registration. See the [backend integration guide](docs/backend.md) for login, ingestion, and MCP examples.
 
 Default ports: frontend **3000**, backend **3001**, PostgreSQL **5432**. If you already have a local PostgreSQL instance, use that connection and skip `npm run db:up`; ensure the `vector` extension is available when implementing retrieval. If you change credentials or the port in the root `.env`, update `DATABASE_URL` in `apps/api/.env` accordingly. The example credentials are for local development only.
 
@@ -48,22 +64,38 @@ Default ports: frontend **3000**, backend **3001**, PostgreSQL **5432**. If you 
 | `npm run db:migrate --workspace @veridict/api -- --name init` | Create and apply a migration after adding models |
 | `npm run db:studio`                                           | Open Prisma Studio                               |
 
-The Prisma schema is intentionally empty. There are no migrations or database services registered in NestJS yet. When implementing the data layer, use `PrismaPg` from `@prisma/adapter-pg` to initialize Prisma Client; both dependencies are already installed.
+Additional backend commands:
 
-`infra/postgres/init.sql` enables the `vector` extension when the database volume is first initialized. The embedding model and vector dimensions have yet to be selected.
+| Command                   | Purpose                                                    |
+| ------------------------- | ---------------------------------------------------------- |
+| `npm run db:deploy`       | Apply committed database migrations                        |
+| `npm run admin:bootstrap` | Create a new organization and administrator after building |
+| `npm run test:api`        | Run unit and isolated PostgreSQL/MCP integration tests     |
+
+The Prisma schema includes organizations, users, sessions, knowledge sources, chunks, permissions, policy claims, cases, inquiries, feedback, and audit events. Generate the client after schema changes; commit migrations alongside the schema.
+
+Both the initial migration and `infra/postgres/init.sql` enable the `vector` extension. Vector search uses caller-supplied embeddings with an explicit model identifier and matching dimensions. Without a query embedding, retrieval is lexical. No embedding provider is configured.
 
 ## Project structure
 
 ```text
 apps/
   web/                 # Next.js starter
-  api/                 # NestJS starter
-    prisma/            # Initial schema configuration
+  api/                 # NestJS backend and integration tests
+    prisma/            # Data models and committed migrations
+packages/contracts/    # Shared TypeScript types and Zod input schemas
+docs/                  # Backend API, architecture, accountability
 infra/postgres/        # pgvector extension initialization
 compose.yaml
 ```
 
-Shared contracts can be added in a `packages/` workspace once the team agrees on the interfaces. WorkBuddy/MCP integration has yet to be implemented.
+Person 1 and Person 3 can import `@veridict/contracts`. Streamable HTTP MCP is exposed at `/mcp`; connecting the actual WorkBuddy runtime still requires a live integration check.
+
+Tests create and remove their own PostgreSQL container on an automatically assigned test port. They do not use the development database or change the configured application ports. Docker must be running and the `pgvector/pgvector:pg17` image must be available (`docker pull pgvector/pgvector:pg17` if needed).
+
+- [Backend integration guide and limits](docs/backend.md)
+- [Architecture and trust boundaries](docs/architecture.md)
+- [Accountability](docs/accountability.md)
 
 ## Setup references
 
