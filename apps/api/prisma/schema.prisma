@@ -70,6 +70,7 @@ model Organization {
   sources           KnowledgeSource[]
   inquiries         Inquiry[]
   audits            AuditEvent[]
+  domainOwners      DomainOwner[]
 }
 
 model User {
@@ -91,6 +92,7 @@ model User {
   feedback      FeedbackEvent[] @relation("FeedbackActor")
   reviews       FeedbackEvent[] @relation("FeedbackReviewer")
   audits        AuditEvent[]
+  domainOwnerships DomainOwner[]
   @@unique([orgId, email])
 }
 
@@ -145,6 +147,7 @@ model SourceChunk {
   claims        PolicyClaim[]
   caseEvidence  CaseEvidence[]
   inquiryEvidence InquiryEvidence[]
+  domainOwners DomainOwner[]
   @@unique([sourceId, chunkIndex])
 }
 
@@ -209,6 +212,7 @@ model Inquiry {
   status            InquiryStatus @default(PENDING)
   answer            String?
   structuredAnswer  Json?
+  escalationDomain  String?
   assumptions       String[] @default([])
   limitations       String[] @default([])
   permissionVersion Int
@@ -258,4 +262,18 @@ model AuditEvent {
   metadata     Json
   createdAt    DateTime @default(now())
   @@index([orgId, createdAt])
+}
+
+model DomainOwner {
+  id           String @id @default(uuid()) @db.Uuid
+  orgId        String @db.Uuid
+  organization Organization @relation(fields: [orgId], references: [id])
+  domain       String
+  ownerId      String @db.Uuid
+  owner        User @relation(fields: [ownerId], references: [id])
+  chunkId      String @db.Uuid
+  chunk        SourceChunk @relation(fields: [chunkId], references: [id])
+  contactEmail String
+  updatedAt    DateTime @updatedAt
+  @@unique([orgId, domain])
 }

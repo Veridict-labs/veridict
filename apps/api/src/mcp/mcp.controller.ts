@@ -24,6 +24,7 @@ import {
   reconcileInput,
   resolveInput,
   searchInput,
+  escalationInput,
 } from '@veridict/contracts';
 import { AuthService } from '../auth/auth.service';
 import type { Actor, AuthRequest } from '../auth/actor';
@@ -34,6 +35,7 @@ import { InquiriesService } from '../inquiries/inquiries.service';
 import { parse } from '../common/validation';
 import { AuditService } from '../audit/audit.service';
 import { SecurityService } from '../auth/security.service';
+import { EscalationsService } from '../escalations/escalations.service';
 
 type ToolDefinition = {
   name: string;
@@ -53,11 +55,21 @@ export class McpController {
     private readonly inquiries: InquiriesService,
     private readonly audit: AuditService,
     private readonly security: SecurityService,
+    private readonly escalations: EscalationsService,
   ) {}
 
   private tools(): ToolDefinition[] {
     const complete = answerInput.extend({ inquiry_id: id });
     return [
+      {
+        name: 'resolve_domain_owner',
+        description:
+          'Find a currently visible subject-matter owner when evidence is insufficient. Unavailable and restricted directory entries return the same result.',
+        schema: escalationInput,
+        readOnly: true,
+        run: (a, i) =>
+          this.escalations.resolve(a, parse(escalationInput, i).domain),
+      },
       {
         name: 'search_authorized_knowledge',
         description:

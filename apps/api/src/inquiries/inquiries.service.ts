@@ -11,12 +11,14 @@ import { evidence, maskPII } from '../knowledge/content';
 import type { AnswerInput } from '@veridict/contracts';
 import { answerInput } from '@veridict/contracts';
 import type { Prisma } from '../generated/prisma/client';
+import { EscalationsService } from '../escalations/escalations.service';
 
 @Injectable()
 export class InquiriesService {
   constructor(
     private readonly security: SecurityService,
     private readonly audit: AuditService,
+    private readonly escalations: EscalationsService,
   ) {}
   async visible(
     tx: Prisma.TransactionClient,
@@ -116,6 +118,16 @@ export class InquiriesService {
         inquiry_id: inquiry.id,
         question: maskPII(inquiry.question),
         status: inquiry.status,
+        escalation:
+          !stale &&
+          inquiry.status === 'INSUFFICIENT_EVIDENCE' &&
+          inquiry.escalationDomain
+            ? await this.escalations.resolveIn(
+                tx,
+                actor,
+                inquiry.escalationDomain,
+              )
+            : null,
         answer: stale ? null : inquiry.answer ? maskPII(inquiry.answer) : null,
         assumptions: stale ? [] : inquiry.assumptions.map(maskPII),
         limitations: stale
@@ -181,10 +193,18 @@ export class InquiriesService {
         ...input.conflicts.flatMap((c) => c.evidence),
         ...input.decision_trail.flatMap((n) => n.evidence),
       ];
+      const escalation =
+        input.status === 'INSUFFICIENT_EVIDENCE' && input.escalation_domain
+          ? await this.escalations.resolveIn(tx, actor, input.escalation_domain)
+          : null;
+      const references = [
+        ...citations,
+        ...(escalation?.evidence ? [escalation.evidence] : []),
+      ];
       const chunks = await this.security.chunks(
         tx,
         actor,
-        citations.map((c) => c.chunk_id),
+        references.map((c) => c.chunk_id),
       );
       if (
         citations.some(
@@ -209,6 +229,7 @@ export class InquiriesService {
           limitations: input.limitations,
           permissionVersion: organization.permissionVersion,
           structuredAnswer: input,
+          escalationDomain: input.escalation_domain ?? null,
           evidence: { create: chunks.map((c) => ({ chunkId: c.id })) },
         },
       });

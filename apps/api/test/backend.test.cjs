@@ -838,7 +838,7 @@ test('real MCP clients discover tools and remain isolated by the bearer token su
       }),
     );
     const listed = await first.listTools();
-    assert.equal(listed.tools.length, 7);
+    assert.equal(listed.tools.length, 8);
     assert.ok(
       listed.tools.some((t) => t.name === 'search_authorized_knowledge'),
     );
@@ -1012,6 +1012,70 @@ test('preview provides stable masked chunks for embedding without persisting a s
   });
   assert.equal(stored.chunks.length, preview.body.chunks.length);
 });
+test('domain-owner escalation respects source ACL and is attached to insufficient answers', async () => {
+  const source = await ingest({
+    type: 'DOCUMENT',
+    title: 'HR contact directory',
+    content: 'Fuel questions: contact the HR reviewer.',
+    permissions: [{ subject_type: 'USER', subject_id: employeeId }],
+  });
+  const body = {
+    owner_id: reviewerId,
+    evidence_chunk_id: source.chunks[0].chunk_id,
+    contact_email: 'fuel-owner@example.test',
+  };
+  assert.equal(
+    (await request('/v1/domains/fuel/owner', employee, body, 'PUT')).status,
+    403,
+  );
+  assert.equal(
+    (await request('/v1/domains/fuel/owner', admin, body, 'PUT')).status,
+    200,
+  );
+  const found = await request('/v1/escalations/resolve', employee, {
+    domain: 'fuel',
+  });
+  assert.equal(found.body.owner.contact_email, body.contact_email);
+  const denied = await request('/v1/escalations/resolve', outsider, {
+    domain: 'fuel',
+  });
+  const absent = await request('/v1/escalations/resolve', outsider, {
+    domain: 'missing',
+  });
+  assert.deepEqual(denied.body, absent.body);
+  const inquiry = await request('/v1/inquiries', employee, {
+    question: 'What is the new allowance for a missing category?',
+  });
+  const key = inquiry.body.inquiry_id;
+  assert.equal(
+    (
+      await request(`/v1/inquiries/${key}/answer`, agent, {
+        status: 'INSUFFICIENT_EVIDENCE',
+        answer: 'I do not have enough evidence. Contact the authorized owner.',
+        citations: [],
+        escalation_domain: 'fuel',
+      })
+    ).status,
+    201,
+  );
+  assert.equal(
+    (await request(`/v1/inquiries/${key}`, employee)).body.escalation.status,
+    'AVAILABLE',
+  );
+  await request(
+    `/v1/sources/${source.source_id}/permissions`,
+    admin,
+    { permissions: [] },
+    'PUT',
+  );
+  assert.equal(
+    (await request('/v1/escalations/resolve', employee, { domain: 'fuel' }))
+      .body.status,
+    'UNAVAILABLE',
+  );
+  assert.equal((await request(`/v1/inquiries/${key}`, employee)).status, 404);
+});
+
 test('last admin protection and deactivation revoke user and agent sessions immediately', async () => {
   const current = await request('/v1/auth/me', admin);
   assert.equal(

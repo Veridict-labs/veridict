@@ -119,6 +119,13 @@ export const searchInput = z
     'Embedding and model must be supplied together',
   );
 export const evidenceInput = z.strictObject({ source_id: id, chunk_id: id });
+export const domainName = z.string().regex(/^[a-z][a-z0-9_-]{0,79}$/);
+export const domainOwnerInput = z.strictObject({
+  owner_id: id,
+  evidence_chunk_id: id,
+  contact_email: z.email().max(254),
+});
+export const escalationInput = z.strictObject({ domain: domainName });
 export const policyInput = z
   .strictObject({
     evidence_chunk_id: id,
@@ -176,6 +183,7 @@ export const answerInput = z
       'UNAVAILABLE',
     ]),
     answer: text.max(20000),
+    escalation_domain: domainName.optional(),
     citations: z.array(citationSchema).max(100),
     assumptions: z.array(text.max(500)).max(30).default([]),
     limitations: z.array(text.max(500)).max(30).default([]),

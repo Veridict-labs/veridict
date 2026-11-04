@@ -111,6 +111,12 @@ Tools: `search_authorized_knowledge`, `resolve_policy_claims`, `find_validated_p
 
 The server is stateless between HTTP requests and verifies identity per invocation. Arguments cannot select a different actor. Missing and denied evidence share a generic tool error. Legacy SSE and GET/DELETE session transports are not implemented.
 
+## Domain-owner routing
+
+`POST /v1/escalations/resolve` and MCP `resolve_domain_owner` accept `{ "domain": "fuel" }`. Admins curate mappings using `PUT /v1/domains/:domain/owner` with `owner_id`, `evidence_chunk_id`, and `contact_email`, or DELETE the same path. Curating a mapping requires source READ and REVIEW. The owner must be active in the same organization.
+
+Contacts are visible only while their directory evidence is readable. Restricted and missing entries return the same `{ status: "UNAVAILABLE", owner: null, evidence: null }`. Setting `escalation_domain` on an INSUFFICIENT_EVIDENCE answer adds a freshly authorized `escalation` to the inquiry response and includes its directory evidence in stored-answer revocation. Mapping updates/removal mark affected answers for revalidation. A business-email directory entry does not grant policy authority or permission to reveal personal phone numbers.
+
 ## Operations and verification
 
 Business responses use `Cache-Control: no-store`. ACL writes take an exclusive organization lock; protected operations take a shared lock and revalidate identity. Completed revocations affect subsequent operations. Source replacements invalidate dependent answers; time-based changes are checked when opening an inquiry. A new answer can still cite old and new sources to explain their conflict.
