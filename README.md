@@ -1,6 +1,8 @@
 # Veridict
 
-A monorepo for Knowledge Guardian. The NestJS backend implements organization-scoped authentication, permissions, ingestion, retrieval, policy resolution, inquiry history, reviewed feedback, audit logs, and an authenticated MCP endpoint. The Next.js frontend remains a starter for Person 3.
+A monorepo for Veridict. The NestJS backend implements organization-scoped authentication, permissions, ingestion, retrieval, policy resolution, inquiry history, reviewed feedback, audit logs, and an authenticated MCP endpoint. The Next.js frontend remains a starter for Person 3.
+
+Product specification: [Veridict PRD](Veridict_PRD_v1_Track_A.md).
 
 WorkBuddy orchestration and the embedding provider remain integration tasks for Person 1. A new inquiry stays pending until an external agent submits an answer.
 

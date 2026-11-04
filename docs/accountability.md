@@ -1,6 +1,6 @@
-# Knowledge Guardian accountability
+# Veridict accountability
 
-Knowledge Guardian provides evidence and explanations for workplace questions. It does not grant approval authority or execute transactions.
+Veridict provides evidence and explanations for workplace questions. It does not grant approval authority or execute transactions.
 
 | Area                  | Backend commitment                                                                                                                                                                                                                                         |
 | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

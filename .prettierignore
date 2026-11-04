@@ -4,3 +4,4 @@ dist
 package-lock.json
 apps/api/src/generated
 Knowledge_Guardian_*
+Veridict_PRD_*
