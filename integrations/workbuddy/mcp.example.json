@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "veridict": {
+      "type": "streamableHttp",
+      "url": "${VERIDICT_API_URL}/mcp",
+      "headers": {
+        "Authorization": "Bearer ${VERIDICT_AGENT_TOKEN}"
+      },
+      "timeout": 30000
+    }
+  }
+}
