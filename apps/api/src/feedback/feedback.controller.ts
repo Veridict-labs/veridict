@@ -8,6 +8,10 @@ import { FeedbackService } from './feedback.service';
 @Controller('v1/feedback')
 export class FeedbackController {
   constructor(private readonly feedback: FeedbackService) {}
+  @Get(':id')
+  detail(@CurrentActor() actor: Actor, @Param('id') feedbackId: string) {
+    return this.feedback.detail(actor, parse(id, feedbackId));
+  }
   @Post()
   submit(@CurrentActor() actor: Actor, @Body() body: unknown) {
     return this.feedback.submit(actor, parse(feedbackInput, body));

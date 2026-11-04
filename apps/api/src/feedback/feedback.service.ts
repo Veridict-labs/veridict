@@ -13,7 +13,7 @@ import { AuditService } from '../audit/audit.service';
 import { InquiriesService } from '../inquiries/inquiries.service';
 import { PolicyService } from '../policy/policy.service';
 import { parse } from '../common/validation';
-import { maskPII } from '../knowledge/content';
+import { evidence, maskPII } from '../knowledge/content';
 
 @Injectable()
 export class FeedbackService {
@@ -116,6 +116,52 @@ export class FeedbackService {
       };
     });
   }
+  detail(actor: Actor, feedbackId: string) {
+    return this.security.scope(actor, false, async (tx) => {
+      const feedback = await tx.feedbackEvent.findFirst({
+        where: { id: feedbackId, inquiry: { orgId: actor.orgId } },
+      });
+      if (!feedback) throw new NotFoundException();
+      this.security.requireReviewer(actor, feedback.domain);
+      const inquiry = await this.inquiries.visible(
+        tx,
+        actor,
+        feedback.inquiryId,
+        false,
+      );
+      for (const item of inquiry.evidence)
+        await this.security.source(tx, actor, item.chunk.sourceId, 'REVIEW');
+      if (inquiry.status === 'NEEDS_REVALIDATION')
+        throw new NotFoundException();
+      const proposed = feedback.proposedCase
+        ? parse(caseInput, feedback.proposedCase)
+        : null;
+      await this.audit.record(tx, actor, 'FEEDBACK_OPENED', [feedbackId]);
+      return {
+        feedback_id: feedback.id,
+        inquiry_id: inquiry.id,
+        domain: feedback.domain,
+        action: feedback.action,
+        reason: maskPII(feedback.reason),
+        status: feedback.status,
+        proposed_case: proposed
+          ? {
+              ...proposed,
+              outcome: maskPII(proposed.outcome),
+              authority: maskPII(proposed.authority),
+              context: Object.fromEntries(
+                Object.entries(proposed.context).map(([key, value]) => [
+                  key,
+                  typeof value === 'string' ? maskPII(value) : value,
+                ]),
+              ),
+            }
+          : null,
+        evidence: inquiry.evidence.map((item) => evidence(item.chunk)),
+      };
+    });
+  }
+
   review(
     actor: Actor,
     feedbackId: string,
