@@ -73,6 +73,8 @@ Additional backend commands:
 | `npm run db:deploy`       | Apply committed database migrations                        |
 | `npm run admin:bootstrap` | Create a new organization and administrator after building |
 | `npm run test:api`        | Run unit and isolated PostgreSQL/MCP integration tests     |
+| `npm run test:agent`      | Test the Person 1 MCP client against local HTTP/MCP fixtures |
+| `npm run agent:smoke`     | Check a running API with a delegated user token; see Person 1 setup |
 
 The Prisma schema includes organizations, users, sessions, knowledge sources, chunks, permissions, policy claims, cases, inquiries, feedback, and audit events. Generate the client after schema changes; commit migrations alongside the schema.
 
@@ -86,6 +88,8 @@ apps/
   api/                 # NestJS backend and integration tests
     prisma/            # Data models and committed migrations
 packages/contracts/    # Shared TypeScript types and Zod input schemas
+packages/agent/        # Person 1 MCP connection checks and tests
+integrations/workbuddy/ # Agent instructions and connector template
 docs/                  # Backend API, architecture, accountability
 infra/postgres/        # pgvector extension initialization
 compose.yaml
@@ -96,6 +100,9 @@ Person 1 and Person 3 can import `@veridict/contracts`. Streamable HTTP MCP is e
 Tests create and remove their own PostgreSQL container on an automatically assigned test port. They do not use the development database or change the configured application ports. Docker must be running and the `pgvector/pgvector:pg17` image must be available (`docker pull pgvector/pgvector:pg17` if needed).
 
 - [Backend integration guide and limits](docs/backend.md)
+- [Person 2 checklist and Person 1 handoff](docs/person-2-checklist.md)
+- [Team task division and implementation plan](docs/team-task-division.md)
+- [Person 1 checkpoints and WorkBuddy setup](docs/person-1-checkpoints.md)
 - [Architecture and trust boundaries](docs/architecture.md)
 - [Accountability](docs/accountability.md)
 - [Shared demo fixtures and seed](docs/demo-fixtures.md)
