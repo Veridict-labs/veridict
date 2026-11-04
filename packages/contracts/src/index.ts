@@ -19,11 +19,17 @@ export const inquiryStatus = z.enum([
   'UNAVAILABLE',
   'NEEDS_REVALIDATION',
 ]);
-export const permission = z.strictObject({
-  subject_type: z.enum(['USER', 'DEPARTMENT', 'ORGANIZATION']),
-  subject_id: z.string().min(1).max(100),
-  action: z.enum(['READ', 'REVIEW']).default('READ'),
-});
+export const permission = z
+  .strictObject({
+    subject_type: z.enum(['USER', 'DEPARTMENT', 'ORGANIZATION']),
+    subject_id: z.string().min(1).max(100),
+    action: z.enum(['READ', 'REVIEW']).default('READ'),
+  })
+  .refine(
+    (v) =>
+      v.subject_type === 'DEPARTMENT' || id.safeParse(v.subject_id).success,
+    'User and organization subjects require UUIDs',
+  );
 export const embedding = z
   .array(z.number().finite())
   .min(1)

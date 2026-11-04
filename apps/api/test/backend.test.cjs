@@ -690,6 +690,10 @@ test('feedback stays pending until an independent domain-authorized human review
   );
   const pending = await request('/v1/feedback?domain=fuel', reviewer);
   assert.ok(pending.body.results.some((r) => r.feedback_id === feedbackId));
+  const detail = await request(`/v1/feedback/${feedbackId}`, reviewer);
+  assert.equal(detail.status, 200, JSON.stringify(detail.body));
+  assert.equal(detail.body.proposed_case.authority, 'HR');
+  assert.ok(detail.body.evidence.length > 0);
   const approved = await request(
     `/v1/feedback/${feedbackId}/validate`,
     reviewer,
@@ -886,4 +890,174 @@ test('MCP rejects untrusted origins and unauthenticated requests', async () => {
   });
   assert.equal(result.status, 403);
   assert.equal((await request('/mcp', null, {})).status, 401);
+});
+
+test('an inaccessible replacement cannot cause fallback to an obsolete official rule', async () => {
+  const me = await request('/v1/auth/me', admin);
+  const old = await ingest({
+    type: 'DOCUMENT',
+    title: 'Old scoped rule',
+    state: 'APPROVED',
+    issuer_id: me.body.id,
+    valid_from: '2026-01-01T00:00:00Z',
+    content: 'Old rule',
+    permissions: [{ subject_type: 'ORGANIZATION', subject_id: orgId }],
+  });
+  await request('/v1/policies', admin, {
+    evidence_chunk_id: old.chunks[0].chunk_id,
+    domain: 'hidden-successor',
+    predicate: {},
+    result: 'Old rule',
+    authority: 'HR',
+    valid_from: '2026-01-01T00:00:00Z',
+  });
+  const successor = await ingest({
+    type: 'DOCUMENT',
+    title: 'Private replacement',
+    state: 'APPROVED',
+    issuer_id: me.body.id,
+    version: 2,
+    supersedes_id: old.source_id,
+    valid_from: '2026-02-01T00:00:00Z',
+    content: 'Private rule',
+  });
+  const result = await request('/v1/policies/resolve', employee, {
+    domain: 'hidden-successor',
+    context: {},
+  });
+  assert.equal(result.body.status, 'INSUFFICIENT_EVIDENCE');
+  assert.doesNotMatch(
+    JSON.stringify(result.body),
+    new RegExp(successor.source_id),
+  );
+  assert.doesNotMatch(JSON.stringify(result.body), /Private/);
+  const historical = await request('/v1/policies/resolve', employee, {
+    domain: 'hidden-successor',
+    context: {},
+    as_of: '2026-01-15T00:00:00Z',
+  });
+  assert.equal(historical.body.applicable[0].result, 'Old rule');
+});
+test('audit access is admin-only, tenant-scoped, and records denied evidence reads', async () => {
+  assert.equal((await request('/v1/audit', employee)).status, 403);
+  const events = await request('/v1/audit?limit=100', admin);
+  assert.equal(events.status, 200, JSON.stringify(events.body));
+  assert.ok(events.body.results.length > 0);
+  assert.ok(events.body.results.every((e) => e.orgId === orgId));
+  assert.ok(events.body.results.some((e) => e.eventType === 'REQUEST_DENIED'));
+  assert.doesNotMatch(
+    JSON.stringify(events.body),
+    /Test-only-password|1234567890123456/,
+  );
+});
+test('grant validation rejects foreign users and malformed UUIDs atomically', async () => {
+  const foreign = await request('/v1/auth/me', outsider);
+  assert.equal(
+    (
+      await request(
+        `/v1/sources/${document.source_id}/permissions`,
+        admin,
+        {
+          permissions: [{ subject_type: 'USER', subject_id: foreign.body.id }],
+        },
+        'PUT',
+      )
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await request(
+        `/v1/sources/${document.source_id}/permissions`,
+        admin,
+        { permissions: [{ subject_type: 'USER', subject_id: 'not-a-uuid' }] },
+        'PUT',
+      )
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await request(
+        `/v1/sources/${document.source_id}/evidence?chunk_id=${document.chunks[0].chunk_id}`,
+        employee,
+      )
+    ).status,
+    200,
+  );
+});
+test('large text ingestion respects the documented body limit', async () => {
+  const source = await ingest({
+    type: 'DOCUMENT',
+    title: 'Large text',
+    content: 'Retrieval fixture. '.repeat(8000),
+  });
+  assert.ok(source.chunks.length > 50);
+});
+test('preview provides stable masked chunks for embedding without persisting a source', async () => {
+  const input = {
+    type: 'DOCUMENT',
+    title: 'Preview',
+    content: 'NIK 1234567890123456. '.repeat(120),
+  };
+  const count = await db.knowledgeSource.count();
+  const preview = await request('/v1/knowledge/preview', admin, input);
+  assert.equal(preview.status, 201, JSON.stringify(preview.body));
+  assert.doesNotMatch(JSON.stringify(preview.body), /1234567890123456/);
+  assert.equal(await db.knowledgeSource.count(), count);
+  const stored = await ingest({
+    ...input,
+    embedding_model: 'preview-fixture',
+    embeddings: preview.body.chunks.map(() => [1, 0, 0]),
+  });
+  assert.equal(stored.chunks.length, preview.body.chunks.length);
+});
+test('last admin protection and deactivation revoke user and agent sessions immediately', async () => {
+  const current = await request('/v1/auth/me', admin);
+  assert.equal(
+    (
+      await request(
+        `/v1/users/${current.body.id}`,
+        admin,
+        { active: false },
+        'PATCH',
+      )
+    ).status,
+    403,
+  );
+  const {
+    Client: McpClient,
+  } = require('@modelcontextprotocol/sdk/client/index.js');
+  const {
+    StreamableHTTPClientTransport,
+  } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
+  const client = new McpClient({ name: 'revocation-test', version: '1.0.0' });
+  try {
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(`${url}/mcp`), {
+        requestInit: { headers: { Authorization: `Bearer ${agent}` } },
+      }),
+    );
+    assert.equal(
+      (
+        await request(
+          `/v1/users/${employeeId}`,
+          admin,
+          { active: false },
+          'PATCH',
+        )
+      ).status,
+      200,
+    );
+    assert.equal((await request('/v1/auth/me', employee)).status, 401);
+    assert.equal((await request('/v1/auth/me', agent)).status, 401);
+    await assert.rejects(() =>
+      client.callTool({
+        name: 'search_authorized_knowledge',
+        arguments: { query: 'fuel' },
+      }),
+    );
+  } finally {
+    await client.close();
+  }
 });

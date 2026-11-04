@@ -75,6 +75,23 @@ export class PolicyService {
           },
         });
         if (!previous) throw new NotFoundException();
+        if (previous.evidenceChunkId !== chunk.id) {
+          const oldEvidence = await tx.sourceChunk.findUniqueOrThrow({
+            where: { id: previous.evidenceChunkId },
+            select: { sourceId: true },
+          });
+          if (
+            oldEvidence.sourceId !== source.id &&
+            source.supersedesId !== oldEvidence.sourceId
+          )
+            throw new BadRequestException(
+              'Claim supersession must follow the source version chain',
+            );
+        }
+        if (new Date(input.valid_from) < previous.validFrom)
+          throw new BadRequestException(
+            'Claim versions must have increasing effective dates',
+          );
       }
       const claim = await tx.policyClaim.create({
         data: {
@@ -109,7 +126,16 @@ export class PolicyService {
         evidence: { source: this.security.sourceWhere(actor) },
       },
       include: {
-        evidence: { include: { source: { include: { issuer: true } } } },
+        evidence: {
+          include: {
+            source: {
+              include: {
+                issuer: true,
+                supersededBy: { select: { state: true, validFrom: true } },
+              },
+            },
+          },
+        },
       },
       orderBy: { id: 'asc' },
       take: 501,
@@ -183,6 +209,16 @@ export class PolicyService {
           supersededSources.has(c.evidence.sourceId)
         ) {
           rejected.push({ claim_id: c.id, reason: 'EXPLICITLY_SUPERSEDED' });
+          return false;
+        }
+        const replacement = c.evidence.source.supersededBy;
+        if (
+          replacement?.state === 'APPROVED' &&
+          replacement.validFrom &&
+          replacement.validFrom <= asOf
+        ) {
+          // Do not return obsolete policy when its replacement is inaccessible.
+          rejected.push({ claim_id: c.id, reason: 'OUTSIDE_VALIDITY_WINDOW' });
           return false;
         }
         return true;
@@ -310,7 +346,7 @@ export class PolicyService {
           authority: maskPII(c.authority),
           matching_factors: factors,
           disqualifying_differences: differences,
-          comparable: differences.length === 0,
+          comparable: differences.length === 0 && factors.length > 0,
           evidence: c.evidence.map((e) => evidence(e.chunk)),
         };
       })

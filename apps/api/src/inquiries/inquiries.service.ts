@@ -34,10 +34,42 @@ export class InquiriesService {
         },
       },
       include: {
-        evidence: { include: { chunk: { include: { source: true } } } },
+        evidence: {
+          include: {
+            chunk: {
+              include: {
+                source: {
+                  include: {
+                    supersededBy: {
+                      select: {
+                        state: true,
+                        validFrom: true,
+                        recordedAt: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
       },
     });
     if (!inquiry) throw new NotFoundException();
+    if (
+      inquiry.evidence.some((e) => {
+        const replacement = e.chunk.source.supersededBy;
+        return (
+          replacement?.state === 'APPROVED' &&
+          replacement.validFrom &&
+          replacement.validFrom <= new Date() &&
+          (replacement.validFrom > inquiry.updatedAt ||
+            replacement.recordedAt > inquiry.updatedAt)
+        );
+      })
+    ) {
+      return { ...inquiry, status: 'NEEDS_REVALIDATION' as const };
+    }
     return inquiry;
   }
   create(actor: Actor, question: string) {
