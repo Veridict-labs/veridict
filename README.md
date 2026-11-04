@@ -1,6 +1,6 @@
 # Veridict
 
-A monorepo for Veridict. The NestJS backend implements organization-scoped authentication, permissions, ingestion, retrieval, policy resolution, inquiry history, reviewed feedback, audit logs, and an authenticated MCP endpoint. The Next.js frontend remains a starter for Person 3.
+A monorepo for Veridict. The NestJS backend implements organization-scoped authentication, permissions, ingestion, retrieval, policy resolution, inquiry history, reviewed feedback, audit logs, purpose-scoped personal-data disclosure, domain-owner routing, correlated inquiry traces, and an authenticated MCP endpoint. The Next.js frontend remains a starter for Person 3.
 
 Product specification: [Veridict PRD](Veridict_PRD_v1_Track_A.md).
 
@@ -98,6 +98,7 @@ Tests create and remove their own PostgreSQL container on an automatically assig
 - [Backend integration guide and limits](docs/backend.md)
 - [Architecture and trust boundaries](docs/architecture.md)
 - [Accountability](docs/accountability.md)
+- [Shared demo fixtures and seed](docs/demo-fixtures.md)
 
 ## Setup references
 

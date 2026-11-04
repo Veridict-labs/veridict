@@ -24,35 +24,40 @@ $me = Invoke-RestMethod -Uri "$api/v1/auth/me" -Headers $headers
 
 ## REST endpoints
 
-| Method     | Path                                    | Access and purpose                                                |
-| ---------- | --------------------------------------- | ----------------------------------------------------------------- |
-| GET        | `/health`                               | Public liveness; returns `ok`                                     |
-| POST       | `/v1/auth/login`                        | Public, rate-limited login                                        |
-| GET        | `/v1/auth/me`                           | Current verified actor                                            |
-| POST       | `/v1/auth/logout`                       | Revoke the supplied session                                       |
-| POST       | `/v1/auth/tool-token`                   | User session; issue an agent token                                |
-| GET / POST | `/v1/users`                             | Admin user listing / creation                                     |
-| PATCH      | `/v1/users/:id`                         | Admin changes role, department, active flag, review domains       |
-| POST       | `/v1/knowledge/preview`                 | Admin; preview masked chunks without persistence                  |
-| POST       | `/v1/knowledge/ingest`                  | Admin; ingest a document, chat, or task export                    |
-| POST       | `/v1/knowledge/search`                  | Authorized lexical or hybrid retrieval                            |
-| PUT        | `/v1/sources/:id/permissions`           | Admin; replace the entire source ACL                              |
-| GET        | `/v1/sources/:id/evidence?chunk_id=...` | Reauthorize and open one chunk                                    |
-| POST       | `/v1/policies`                          | Human domain reviewer with source READ + REVIEW; validate a claim |
-| POST       | `/v1/policies/resolve`                  | Resolve visible claims by context and effective time              |
-| POST       | `/v1/cases`                             | Human reviewer; record a validated historical case                |
-| POST       | `/v1/cases/search`                      | Search visible validated cases                                    |
-| POST       | `/v1/truth/reconcile`                   | Retrieve and compare official rules and observed practice         |
-| POST / GET | `/v1/inquiries`                         | Create a pending inquiry / list own accessible inquiries          |
-| GET        | `/v1/inquiries/:id`                     | Own inquiry with current evidence access checked                  |
-| POST       | `/v1/inquiries/:id/answer`              | Delegated agent for the inquiry owner; persist an answer          |
-| POST       | `/v1/feedback`                          | Inquiry owner or their agent; submit pending feedback             |
-| GET        | `/v1/feedback?domain=...`               | Domain reviewer; list reviewable pending feedback                 |
-| GET        | `/v1/feedback/:id`                      | Domain reviewer; inspect proposal and evidence                    |
-| POST       | `/v1/feedback/:id/validate`             | Independent human reviewer; validate or reject                    |
-| GET        | `/v1/audit`                             | Admin; organization-scoped audit records                          |
-| POST       | `/v1/audit/prune`                       | Admin; remove logs older than `retention_days` (default 30)       |
-| POST       | `/mcp`                                  | Authenticated Streamable HTTP MCP                                 |
+| Method       | Path                                    | Access and purpose                                                |
+| ------------ | --------------------------------------- | ----------------------------------------------------------------- |
+| GET          | `/health`                               | Public liveness; returns `ok`                                     |
+| POST         | `/v1/auth/login`                        | Public, rate-limited login                                        |
+| GET          | `/v1/auth/me`                           | Current verified actor                                            |
+| POST         | `/v1/auth/logout`                       | Revoke the supplied session                                       |
+| POST         | `/v1/auth/tool-token`                   | User session; issue an agent token                                |
+| GET / POST   | `/v1/users`                             | Admin user listing / creation                                     |
+| PATCH        | `/v1/users/:id`                         | Admin changes role, department, active flag, review domains       |
+| POST         | `/v1/knowledge/preview`                 | Admin; preview masked chunks without persistence                  |
+| POST         | `/v1/knowledge/ingest`                  | Admin; ingest a document, chat, or task export                    |
+| POST         | `/v1/knowledge/search`                  | Authorized lexical or hybrid retrieval                            |
+| PUT          | `/v1/sources/:id/permissions`           | Admin; replace the entire source ACL                              |
+| GET          | `/v1/sources/:id/evidence?chunk_id=...` | Reauthorize and open one chunk                                    |
+| POST         | `/v1/policies`                          | Human domain reviewer with source READ + REVIEW; validate a claim |
+| POST         | `/v1/policies/resolve`                  | Resolve visible claims by context and effective time              |
+| POST         | `/v1/cases`                             | Human reviewer; record a validated historical case                |
+| POST         | `/v1/cases/search`                      | Search visible validated cases                                    |
+| POST         | `/v1/truth/reconcile`                   | Retrieve and compare official rules and observed practice         |
+| POST / GET   | `/v1/inquiries`                         | Create a pending inquiry / list own accessible inquiries          |
+| GET          | `/v1/inquiries/:id`                     | Own inquiry with current evidence access checked                  |
+| POST         | `/v1/inquiries/:id/answer`              | Delegated agent for the inquiry owner; persist an answer          |
+| POST         | `/v1/feedback`                          | Inquiry owner or their agent; submit pending feedback             |
+| GET          | `/v1/feedback?domain=...`               | Domain reviewer; list reviewable pending feedback                 |
+| GET          | `/v1/feedback/:id`                      | Domain reviewer; inspect proposal and evidence                    |
+| POST         | `/v1/feedback/:id/validate`             | Independent human reviewer; validate or reject                    |
+| GET          | `/v1/audit`                             | Admin; organization-scoped audit records                          |
+| POST         | `/v1/audit/prune`                       | Admin; remove logs older than `retention_days` (default 30)       |
+| POST         | `/mcp`                                  | Authenticated Streamable HTTP MCP                                 |
+| PUT / DELETE | `/v1/domains/:domain/owner`             | Admin; curate or remove a source-backed domain owner              |
+| POST         | `/v1/escalations/resolve`               | Find a currently visible domain owner                             |
+| GET          | `/v1/inquiries/:id/trace`               | Own inquiry trace with currently authorized source references     |
+| PUT          | `/v1/sources/:id/personal-data-grants`  | Admin; replace category/purpose disclosure grants                 |
+| POST         | `/v1/sources/:id/personal-data`         | Purpose-bound disclosure for an owned inquiry                     |
 
 User, inquiry, and audit lists accept `limit` (1–100, default 30) and an optional UUID `cursor`. Inquiry/audit responses expose `next_cursor`; user listing returns an array. Resource denial and absence share HTTP 404 with `{ "error": "UNAVAILABLE", "message": "Resource unavailable" }`. Invalid input is HTTP 400, role violations 403, and conflicts 409. REST POST operations return 201; MCP uses its transport-specific statuses.
 
@@ -77,7 +82,7 @@ Sources default to private READ + REVIEW grants for the ingesting administrator.
 
 Human reviewers require matching `review_domains` plus source READ and REVIEW. ADMIN has domain authority but still needs source grants. Approved sources require an active administrator/reviewer issuer. Canonical policy claims require a domain-authorized issuer, a human validator, and a `result` quoted from the source chunk. Approval metadata represents human curation, not LLM inference. Replacement sources require sequential `version`, `supersedes_id`, and an effective start; cross-source claim supersession must follow that version chain.
 
-Chunks contain at most 1,600 UTF-16 code units with 200 overlap, original normalized-text offsets, and a SHA-256 hash. Returned excerpts mask NIK and Indonesian phone patterns. `redacted` indicates masking; displayed length can differ from the original span. This is a targeted pattern masker, not a general PII classifier.
+Chunks contain at most 1,600 UTF-16 code units with 200 overlap, original normalized-text offsets, and a SHA-256 hash. Returned excerpts redact recognized personal-data patterns and explicitly annotated contextual data. `redacted` indicates masking; displayed length can differ from the original span. The classification coverage and annotation requirements are described below.
 
 For real embeddings, call `/v1/knowledge/preview` with the ingestion body, embed the returned masked chunks, then submit one nonzero numeric vector per chunk together with `embedding_model`. Vectors for a source must have equal dimensions (at most 4,096). The backend does not fabricate embeddings or select an external provider.
 
@@ -107,7 +112,7 @@ Feedback contains `inquiry_id`, `domain`, `action`, `reason`, and optional `prop
 
 Connect Streamable HTTP to `http://localhost:3001/mcp` using a per-user bearer token. `MCP_PUBLIC_URL` configures the expected public host/origin; `WEB_ORIGIN` allows the frontend origin. Set both for the actual deployment behind a reverse proxy. The maintained MCP SDK v1 negotiates its supported protocol; actual WorkBuddy compatibility still requires a live spike.
 
-Tools: `search_authorized_knowledge`, `resolve_policy_claims`, `find_validated_precedents`, `reconcile_truth`, `get_evidence`, `submit_feedback`, and `complete_inquiry`.
+Tools: `search_authorized_knowledge`, `resolve_policy_claims`, `find_validated_precedents`, `reconcile_truth`, `get_evidence`, `resolve_domain_owner`, `get_personal_data`, `submit_feedback`, and `complete_inquiry`.
 
 The server is stateless between HTTP requests and verifies identity per invocation. Arguments cannot select a different actor. Missing and denied evidence share a generic tool error. Legacy SSE and GET/DELETE session transports are not implemented.
 
