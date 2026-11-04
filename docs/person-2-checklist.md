@@ -1,5 +1,7 @@
 # Checklist Person 2 dan handoff ke Person 1
 
+**Pembaruan implementasi:** branch `feat/veridict-backend` menambahkan routing owner ber-ACL, audit per inquiry, disclosure berizin untuk 11 kategori personal data, dan fixture/seed bersama. Setelah integrasi main terbaru, 42 tes backend dan 10 tes client agent lulus, beserta build/lint/typecheck seluruh workspace. Lihat [kontrak terbaru](backend.md), [fixture demo](demo-fixtures.md), dan [verifikasi](verification.md). Baseline di bawah tetap menjadi catatan historis; penerimaan WorkBuddy nyata dan evaluasi end-to-end masih memerlukan tim.
+
 Tanggal penyusunan: 4 November 2026. Baseline kode: `f15bbed`.
 
 Sumber pembagian tugas: [Team Task Division & Implementation Plan](team-task-division.md), salinan identik dokumen `Knowledge_Guardian_Team_Task_Division.md` yang diberikan pengguna. Dokumen sumber masih menggunakan nama Knowledge Guardian dan berstatus proposed implementation plan. Checklist berikut memetakan rencana tersebut ke implementasi Veridict yang tersedia; checkbox kosong pada dokumen sumber tidak otomatis membuktikan bahwa suatu fitur belum dibuat.
