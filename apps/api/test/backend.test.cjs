@@ -1061,3 +1061,77 @@ test('last admin protection and deactivation revoke user and agent sessions imme
     await client.close();
   }
 });
+
+test('future-effective source replacement invalidates an existing answer when it becomes active', async () => {
+  const adminMe = await request('/v1/auth/me', admin);
+  const source = await ingest({
+    type: 'DOCUMENT',
+    title: 'Scheduled policy',
+    state: 'APPROVED',
+    issuer_id: adminMe.body.id,
+    content: 'Original scheduled rule',
+    permissions: [{ subject_type: 'ORGANIZATION', subject_id: orgId }],
+  });
+  const inquiry = await request('/v1/inquiries', reviewer, {
+    question: 'What is the scheduled rule?',
+  });
+  const key = inquiry.body.inquiry_id;
+  const token = (await request('/v1/auth/tool-token', reviewer, {})).body
+    .access_token;
+  assert.equal(
+    (
+      await request(`/v1/inquiries/${key}/answer`, token, {
+        status: 'ANSWERED',
+        answer: 'Original scheduled rule',
+        citations: [
+          { source_id: source.source_id, chunk_id: source.chunks[0].chunk_id },
+        ],
+      })
+    ).status,
+    201,
+  );
+  const effectiveAt = Date.now() + 1500;
+  await ingest({
+    type: 'DOCUMENT',
+    title: 'Scheduled replacement',
+    state: 'APPROVED',
+    issuer_id: adminMe.body.id,
+    content: 'Replacement scheduled rule',
+    version: 2,
+    supersedes_id: source.source_id,
+    valid_from: new Date(effectiveAt).toISOString(),
+  });
+  const before = await request(`/v1/inquiries/${key}`, reviewer);
+  if (Date.now() < effectiveAt) assert.equal(before.body.status, 'ANSWERED');
+  await new Promise((resolve) =>
+    setTimeout(resolve, Math.max(0, effectiveAt - Date.now()) + 30),
+  );
+  const stale = await request(`/v1/inquiries/${key}`, reviewer);
+  assert.equal(stale.body.status, 'NEEDS_REVALIDATION');
+  assert.equal(stale.body.answer, null);
+});
+
+test('bootstrap CLI creates an administrator once and rejects a duplicate organization', async () => {
+  const env = {
+    ...process.env,
+    BOOTSTRAP_ORG_SLUG: 'bootstrap-fixture',
+    BOOTSTRAP_EMAIL: 'bootstrap@example.test',
+    BOOTSTRAP_PASSWORD: password,
+  };
+  const args = [path.resolve(__dirname, '../dist/scripts/bootstrap-admin.js')];
+  const options = {
+    cwd: path.resolve(__dirname, '..'),
+    env,
+    encoding: 'utf8',
+    stdio: 'pipe',
+    timeout: 15000,
+  };
+  const result = JSON.parse(execFileSync(process.execPath, args, options));
+  const user = await db.user.findUniqueOrThrow({
+    where: { id: result.user_id },
+  });
+  assert.equal(user.role, 'ADMIN');
+  assert.notEqual(user.passwordHash, password);
+  assert.throws(() => execFileSync(process.execPath, args, options));
+  assert.equal(await db.user.count({ where: { orgId: result.org_id } }), 1);
+});
