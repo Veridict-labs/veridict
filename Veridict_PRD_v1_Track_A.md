@@ -1,6 +1,6 @@
 TENCENT CLOUD HACKATHON INDONESIA 2026  |  CHALLENGE A — THE WORKPLACE BRAIN
 
-# Knowledge Guardian
+# Veridict
 
 PRODUCT REQUIREMENTS DOCUMENT (PRD)  ·  Version 1.0
 
@@ -12,7 +12,7 @@ Status: Proposed / implementation-ready specification. Nothing in this PRD claim
 
 | Field | Decision |
 | --- | --- |
-| Product | Knowledge Guardian |
+| Product | Veridict |
 | Owner | Product & Engineering Team (to assign) |
 | Primary scenario | New employee onboarding: reimbursement, leave, approval authority |
 | Additional demo case | SaaS renewal policy vs precedent (synthetic supplement) |
@@ -23,7 +23,7 @@ Status: Proposed / implementation-ready specification. Nothing in this PRD claim
 
 ## 1. Executive summary
 
-Knowledge Guardian turns fragmented company chats, documents and task records into accurate, permission-aware, cited answers. Its differentiation is Organizational Truth Reconciliation: distinguish the currently authorized formal rule (official), validated past actions (operational), and time-specific validity (temporal). A structured evidence trail explains source selection and discrepancies without exposing confidential evidence or hidden model reasoning.
+Veridict turns fragmented company chats, documents and task records into accurate, permission-aware, cited answers. Its differentiation is Organizational Truth Reconciliation: distinguish the currently authorized formal rule (official), validated past actions (operational), and time-specific validity (temporal). A structured evidence trail explains source selection and discrepancies without exposing confidential evidence or hidden model reasoning.
 
 Primary product outcome: employees answer routine workplace questions without repeatedly interrupting senior staff, while maintaining strict access boundaries and auditable responses. This is a workplace knowledge system, not an automated approval, email, procurement, or payment agent.
 
@@ -79,7 +79,7 @@ Primary product outcome: employees answer routine workplace questions without re
 
 ## 5. Detailed functional requirements
 
-### 5.1 Ask Guardian — user-facing workflow
+### 5.1 Ask Veridict — user-facing workflow
 
 1. User signs in and receives verified role, department, organization and identity context.
 1. User asks free-form question; UI may provide onboarding question suggestions.
@@ -193,7 +193,7 @@ WorkBuddy integration is a deployment dependency, not an assumed available HTTP 
 
 | Screen | Key elements | Edge cases |
 | --- | --- | --- |
-| Ask Guardian | Prompt, language-agnostic input, question suggestions, answer, expandable sources | Missing source; conflict; denied content; ambiguous query |
+| Ask Veridict | Prompt, language-agnostic input, question suggestions, answer, expandable sources | Missing source; conflict; denied content; ambiguous query |
 | Evidence Trail | Official evidence, conflict reason codes, source provenance, precedent comparison | Source access revoked after response: deny evidence open |
 | Manager Review | Pending feedback, source/authority context, approve/dispute action | Role/domain mismatch: deny write |
 | Evaluation / Admin | Per-test pass/fail and screenshots, ingestion and permission diagnostics | Never expose confidential test source through shared dashboard |
@@ -229,9 +229,9 @@ Organizer tests: run approximately 20 official Challenge A cases when provided, 
 | Evidence attribution accuracy | Material claims with supporting, visible source spans / all material claims | Use evaluator review on sampled answers |
 | Conflict resolution accuracy | Correct source choice and explanation / conflict cases | Confusion and unresolved counts |
 | Supported Answer Accuracy | Correct answer + correct source + scope + assumptions + no denied evidence | Strict all-or-nothing per case |
-| User task time | Median minutes to correctly complete same task manually vs Guardian | Counterbalanced pilot; no unmeasured claims |
+| User task time | Median minutes to correctly complete same task manually vs Veridict | Counterbalanced pilot; no unmeasured claims |
 
-Baseline: compare Guardian against a simple RAG implementation using the same source corpus, same effective ACL, same test queries and model where practical. Fix prompts and settings; record runtime version, test date, attempts, seed where supported, failure examples, and confidence intervals if sample size supports them. Baseline must also be access-safe; never intentionally expose restricted material to make it look worse.
+Baseline: compare Veridict against a simple RAG implementation using the same source corpus, same effective ACL, same test queries and model where practical. Fix prompts and settings; record runtime version, test date, attempts, seed where supported, failure examples, and confidence intervals if sample size supports them. Baseline must also be access-safe; never intentionally expose restricted material to make it look worse.
 
 Usability pilot: 5–8 participants or clearly labeled internal testers; randomized/counterbalanced tasks on reimbursement, leave, conflict and missing information. Measure correctness, time, effort (1–5), and ability to verify cited answer. Report limitations.
 
@@ -261,7 +261,7 @@ Team of three (proposed): AI/WorkBuddy engineer owns tool orchestration and eval
 
 ## 13. Accountability sheet — one-page content specification
 
-| Question | Guardian commitment |
+| Question | Veridict commitment |
 | --- | --- |
 | What can it access? | Only source, chunk, inquiry and precedent data authorized for verified requesting user at query time. |
 | What does it do autonomously? | Scoped retrieval, candidate claim extraction, deterministic validity checks, grounded synthesis, safe abstention, audit recording. |
@@ -273,7 +273,7 @@ Team of three (proposed): AI/WorkBuddy engineer owns tool orchestration and eval
 
 | Deliverable | Evidence to create |
 | --- | --- |
-| Title + short blurb | Knowledge Guardian; “Trusted workplace answers, grounded in verifiable organizational evidence.” |
+| Title + short blurb | Veridict; “Trusted workplace answers, grounded in verifiable organizational evidence.” |
 | Project description | Problem, user, architecture, prompts/tools, proposed impact and measured results when available |
 | Accountability sheet | Export standalone one-page version of section 13 |
 | Test results | Official test case table with screenshots, pass/fail and failed cases |

@@ -8,4 +8,254 @@ datasource db {
   provider = "postgresql"
 }
 
-// Add application models here when feature implementation starts.
+enum Role {
+  EMPLOYEE
+  REVIEWER
+  ADMIN
+}
+
+enum SessionKind {
+  USER
+  AGENT
+}
+
+enum SourceType {
+  DOCUMENT
+  CHAT
+  TASK
+}
+
+enum SourceState {
+  APPROVED
+  OFFICIAL_INTERNAL
+  INFORMAL
+  DRAFT
+  SUPERSEDED
+  UNKNOWN
+}
+
+enum SubjectType {
+  USER
+  DEPARTMENT
+  ORGANIZATION
+}
+
+enum PermissionAction {
+  READ
+  REVIEW
+}
+
+enum InquiryStatus {
+  PENDING
+  ANSWERED
+  NEEDS_CLARIFICATION
+  INSUFFICIENT_EVIDENCE
+  UNAVAILABLE
+  NEEDS_REVALIDATION
+}
+
+enum ReviewStatus {
+  PENDING_REVIEW
+  VALIDATED
+  REJECTED
+}
+
+model Organization {
+  id                String @id @default(uuid()) @db.Uuid
+  slug              String @unique
+  name              String
+  permissionVersion Int @default(1)
+  createdAt         DateTime @default(now())
+  users             User[]
+  sources           KnowledgeSource[]
+  inquiries         Inquiry[]
+  audits            AuditEvent[]
+}
+
+model User {
+  id            String @id @default(uuid()) @db.Uuid
+  orgId         String @db.Uuid
+  organization  Organization @relation(fields: [orgId], references: [id])
+  email         String
+  name          String
+  passwordHash  String
+  role          Role @default(EMPLOYEE)
+  department    String
+  reviewDomains String[] @default([])
+  active        Boolean @default(true)
+  createdAt     DateTime @default(now())
+  sessions      Session[]
+  ownedSources  KnowledgeSource[] @relation("SourceOwner")
+  issuedSources KnowledgeSource[] @relation("SourceIssuer")
+  inquiries     Inquiry[]
+  feedback      FeedbackEvent[] @relation("FeedbackActor")
+  reviews       FeedbackEvent[] @relation("FeedbackReviewer")
+  audits        AuditEvent[]
+  @@unique([orgId, email])
+}
+
+model Session {
+  id        String @id @default(uuid()) @db.Uuid
+  tokenHash String @unique
+  userId    String @db.Uuid
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind      SessionKind @default(USER)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  @@index([userId, expiresAt])
+}
+
+model KnowledgeSource {
+  id             String @id @default(uuid()) @db.Uuid
+  orgId          String @db.Uuid
+  organization   Organization @relation(fields: [orgId], references: [id])
+  type           SourceType
+  title          String
+  externalId     String?
+  state          SourceState @default(UNKNOWN)
+  ownerId        String @db.Uuid
+  owner          User @relation("SourceOwner", fields: [ownerId], references: [id])
+  issuerId       String? @db.Uuid
+  issuer         User? @relation("SourceIssuer", fields: [issuerId], references: [id])
+  validFrom      DateTime?
+  validUntil     DateTime?
+  recordedAt     DateTime @default(now())
+  version        Int @default(1)
+  supersedesId   String? @unique @db.Uuid
+  supersedes     KnowledgeSource? @relation("SourceVersions", fields: [supersedesId], references: [id])
+  supersededBy   KnowledgeSource? @relation("SourceVersions")
+  embeddingModel String?
+  chunks         SourceChunk[]
+  permissions    Permission[]
+  @@unique([orgId, externalId, version])
+  @@index([orgId, state])
+}
+
+model SourceChunk {
+  id            String @id @default(uuid()) @db.Uuid
+  sourceId      String @db.Uuid
+  source        KnowledgeSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  chunkIndex    Int
+  content       String
+  spanStart     Int
+  spanEnd       Int
+  integrityHash String
+  embedding     Unsupported("vector")?
+  embeddingDims Int?
+  claims        PolicyClaim[]
+  caseEvidence  CaseEvidence[]
+  inquiryEvidence InquiryEvidence[]
+  @@unique([sourceId, chunkIndex])
+}
+
+model Permission {
+  id          String @id @default(uuid()) @db.Uuid
+  sourceId    String @db.Uuid
+  source      KnowledgeSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  subjectType SubjectType
+  subjectId   String
+  action      PermissionAction @default(READ)
+  updatedAt   DateTime @updatedAt
+  @@unique([sourceId, subjectType, subjectId, action])
+}
+
+model PolicyClaim {
+  id              String @id @default(uuid()) @db.Uuid
+  evidenceChunkId String @db.Uuid
+  evidence        SourceChunk @relation(fields: [evidenceChunkId], references: [id])
+  domain          String
+  predicate       Json
+  result          String
+  authority       String
+  validFrom       DateTime
+  validUntil      DateTime?
+  supersedesId    String? @unique @db.Uuid
+  supersedes      PolicyClaim? @relation("ClaimVersions", fields: [supersedesId], references: [id])
+  supersededBy    PolicyClaim? @relation("ClaimVersions")
+  validatedBy     String @db.Uuid
+  createdAt       DateTime @default(now())
+  @@index([domain, validFrom])
+}
+
+model DecisionCase {
+  id         String @id @default(uuid()) @db.Uuid
+  domain     String
+  context    Json
+  outcome    String
+  authority  String
+  status     ReviewStatus @default(PENDING_REVIEW)
+  reviewedBy String? @db.Uuid
+  createdAt  DateTime @default(now())
+  evidence   CaseEvidence[]
+  feedback   FeedbackEvent?
+  @@index([domain, status])
+}
+
+model CaseEvidence {
+  caseId  String @db.Uuid
+  case    DecisionCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  chunkId String @db.Uuid
+  chunk   SourceChunk @relation(fields: [chunkId], references: [id])
+  @@id([caseId, chunkId])
+}
+
+model Inquiry {
+  id                String @id @default(uuid()) @db.Uuid
+  orgId             String @db.Uuid
+  organization      Organization @relation(fields: [orgId], references: [id])
+  askerId           String @db.Uuid
+  asker             User @relation(fields: [askerId], references: [id])
+  question          String
+  status            InquiryStatus @default(PENDING)
+  answer            String?
+  structuredAnswer  Json?
+  assumptions       String[] @default([])
+  limitations       String[] @default([])
+  permissionVersion Int
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  evidence          InquiryEvidence[]
+  feedback          FeedbackEvent[]
+  @@index([orgId, askerId, createdAt])
+}
+
+model InquiryEvidence {
+  inquiryId String @db.Uuid
+  inquiry   Inquiry @relation(fields: [inquiryId], references: [id], onDelete: Cascade)
+  chunkId   String @db.Uuid
+  chunk     SourceChunk @relation(fields: [chunkId], references: [id])
+  @@id([inquiryId, chunkId])
+}
+
+model FeedbackEvent {
+  id           String @id @default(uuid()) @db.Uuid
+  inquiryId    String @db.Uuid
+  inquiry      Inquiry @relation(fields: [inquiryId], references: [id])
+  actorId      String @db.Uuid
+  actor        User @relation("FeedbackActor", fields: [actorId], references: [id])
+  domain       String
+  action       String
+  reason       String
+  proposedCase Json?
+  status       ReviewStatus @default(PENDING_REVIEW)
+  reviewerId   String? @db.Uuid
+  reviewer     User? @relation("FeedbackReviewer", fields: [reviewerId], references: [id])
+  reviewReason String?
+  caseId       String? @unique @db.Uuid
+  case         DecisionCase? @relation(fields: [caseId], references: [id])
+  createdAt    DateTime @default(now())
+}
+
+model AuditEvent {
+  id           String @id @default(uuid()) @db.Uuid
+  orgId        String @db.Uuid
+  organization Organization @relation(fields: [orgId], references: [id])
+  actorId      String @db.Uuid
+  actor        User @relation(fields: [actorId], references: [id])
+  eventType    String
+  resourceRefs String[] @default([])
+  decision     String
+  metadata     Json
+  createdAt    DateTime @default(now())
+  @@index([orgId, createdAt])
+}
