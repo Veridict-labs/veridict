@@ -1,0 +1,17 @@
+node_modules/
+.next/
+dist/
+coverage/
+*.tsbuildinfo
+*.log
+.env
+.env.*
+!.env.example
+!**/.env.example
+apps/api/src/generated/
+.DS_Store
+Thumbs.db
+
+# Local planning documents
+Knowledge_Guardian_Competition_Optimized_Proposal_v5.docx
+Knowledge_Guardian_Team_Task_Division.md

@@ -1,0 +1,29 @@
+{
+  "name": "veridict",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n web,api -c cyan,green \"npm run dev -w @veridict/web\" \"npm run dev -w @veridict/api\"",
+    "dev:web": "npm run dev -w @veridict/web",
+    "dev:api": "npm run dev -w @veridict/api",
+    "build": "npm run build --workspaces",
+    "typecheck": "npm run typecheck --workspaces",
+    "lint": "npm run lint --workspaces",
+    "format": "prettier --write .",
+    "db:up": "docker compose up -d --wait db",
+    "db:down": "docker compose down",
+    "db:generate": "npm run db:generate -w @veridict/api",
+    "db:migrate": "npm run db:migrate -w @veridict/api",
+    "db:studio": "npm run db:studio -w @veridict/api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "prettier": "^3.6.2"
+  }
+}
