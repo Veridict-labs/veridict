@@ -563,3 +563,251 @@ test('equally applicable conflicting approved claims require review', async () =
   assert.equal(result.body.status, 'NEEDS_REVIEW');
   assert.equal(result.body.applicable.length, 2);
 });
+
+let historySource, inquiryId, agent, feedbackId;
+test('inquiries wait for the external agent and validate citation identities before completion', async () => {
+  historySource = await ingest({
+    type: 'DOCUMENT',
+    title: 'Inquiry evidence',
+    content: 'Fuel approval was observed in a historical case.',
+    permissions: [
+      { subject_type: 'ORGANIZATION', subject_id: orgId },
+      { subject_type: 'USER', subject_id: reviewerId, action: 'REVIEW' },
+    ],
+  });
+  const inquiry = await request('/v1/inquiries', employee, {
+    question: 'What happened in the fuel approval case?',
+  });
+  assert.equal(inquiry.status, 201, JSON.stringify(inquiry.body));
+  assert.equal(inquiry.body.orchestration, 'AWAITING_AGENT');
+  inquiryId = inquiry.body.inquiry_id;
+  agent = (await request('/v1/auth/tool-token', employee, {})).body
+    .access_token;
+  const answer = {
+    status: 'ANSWERED',
+    answer: 'An approval was observed.',
+    citations: [
+      {
+        source_id: historySource.source_id,
+        chunk_id: historySource.chunks[0].chunk_id,
+      },
+    ],
+  };
+  assert.equal(
+    (await request(`/v1/inquiries/${inquiryId}/answer`, employee, answer))
+      .status,
+    403,
+  );
+  assert.equal(
+    (
+      await request(`/v1/inquiries/${inquiryId}/answer`, agent, {
+        ...answer,
+        citations: [],
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await request(`/v1/inquiries/${inquiryId}/answer`, agent, {
+        ...answer,
+        citations: [
+          {
+            source_id: randomUUID(),
+            chunk_id: historySource.chunks[0].chunk_id,
+          },
+        ],
+      })
+    ).status,
+    404,
+  );
+  assert.equal(
+    (await request(`/v1/inquiries/${inquiryId}/answer`, agent, answer)).status,
+    201,
+  );
+  assert.equal(
+    (await request(`/v1/inquiries/${inquiryId}/answer`, agent, answer)).status,
+    409,
+  );
+  assert.equal(
+    (await request(`/v1/inquiries/${inquiryId}`, employee)).body.citations[0]
+      .source_id,
+    historySource.source_id,
+  );
+  assert.equal(
+    (await request(`/v1/inquiries/${inquiryId}`, outsider)).status,
+    404,
+  );
+  assert.equal(
+    (await request(`/v1/inquiries/${inquiryId}`, admin)).status,
+    404,
+  );
+});
+test('feedback stays pending until an independent domain-authorized human reviewer validates it', async () => {
+  const result = await request('/v1/feedback', employee, {
+    inquiry_id: inquiryId,
+    domain: 'fuel',
+    action: 'CONFIRM',
+    reason: 'Checked against the cited record.',
+    proposed_case: {
+      domain: 'fuel',
+      context: { type: 'fuel' },
+      outcome: 'Approval observed',
+      authority: 'HR',
+      evidence_chunk_ids: [historySource.chunks[0].chunk_id],
+    },
+  });
+  assert.equal(result.status, 201, JSON.stringify(result.body));
+  feedbackId = result.body.feedback_id;
+  assert.equal(result.body.status, 'PENDING_REVIEW');
+  assert.equal(
+    (
+      await request('/v1/cases/search', employee, {
+        domain: 'fuel',
+        context: { type: 'fuel' },
+      })
+    ).body.results.length,
+    0,
+  );
+  assert.equal(
+    (
+      await request(`/v1/feedback/${feedbackId}/validate`, employee, {
+        decision: 'VALIDATED',
+        reason: 'Self approval',
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await request(`/v1/feedback/${feedbackId}/validate`, agent, {
+        decision: 'VALIDATED',
+        reason: 'Agent approval',
+      })
+    ).status,
+    403,
+  );
+  const pending = await request('/v1/feedback?domain=fuel', reviewer);
+  assert.ok(pending.body.results.some((r) => r.feedback_id === feedbackId));
+  const approved = await request(
+    `/v1/feedback/${feedbackId}/validate`,
+    reviewer,
+    {
+      decision: 'VALIDATED',
+      reason: 'Source and context independently checked.',
+    },
+  );
+  assert.equal(approved.status, 201, JSON.stringify(approved.body));
+  assert.ok(approved.body.case_id);
+  assert.equal(
+    (
+      await request(`/v1/feedback/${feedbackId}/validate`, reviewer, {
+        decision: 'VALIDATED',
+        reason: 'Duplicate',
+      })
+    ).status,
+    409,
+  );
+  assert.equal(
+    (
+      await request('/v1/cases/search', employee, {
+        domain: 'fuel',
+        context: { type: 'fuel' },
+      })
+    ).body.results.length,
+    1,
+  );
+});
+test('revocation hides stored answer text, inquiry history, feedback and precedents', async () => {
+  const revoke = await request(
+    `/v1/sources/${historySource.source_id}/permissions`,
+    admin,
+    {
+      permissions: [
+        {
+          subject_type: 'USER',
+          subject_id: (await request('/v1/auth/me', admin)).body.id,
+          action: 'READ',
+        },
+      ],
+    },
+    'PUT',
+  );
+  assert.equal(revoke.status, 200);
+  assert.equal(
+    (await request(`/v1/inquiries/${inquiryId}`, employee)).status,
+    404,
+  );
+  assert.ok(
+    !(await request('/v1/inquiries', employee)).body.results.some(
+      (r) => r.inquiry_id === inquiryId,
+    ),
+  );
+  assert.equal(
+    (
+      await request('/v1/cases/search', employee, {
+        domain: 'fuel',
+        context: {},
+      })
+    ).body.results.length,
+    0,
+  );
+  assert.equal(
+    (
+      await request('/v1/feedback', employee, {
+        inquiry_id: inquiryId,
+        domain: 'fuel',
+        action: 'COMMENT',
+        reason: 'Stale reference',
+      })
+    ).status,
+    404,
+  );
+});
+
+test('structured answer and decision trail evidence participate in revocation checks', async () => {
+  const source = await ingest({
+    type: 'DOCUMENT',
+    title: 'Trail-only source',
+    content: 'A supporting operational record.',
+    permissions: [{ subject_type: 'USER', subject_id: employeeId }],
+  });
+  const inquiry = await request('/v1/inquiries', employee, {
+    question: 'Compare the records',
+  });
+  const key = inquiry.body.inquiry_id;
+  const result = await request(`/v1/inquiries/${key}/answer`, agent, {
+    status: 'ANSWERED',
+    answer: 'A supported comparison.',
+    citations: [
+      { source_id: document.source_id, chunk_id: document.chunks[0].chunk_id },
+    ],
+    operational_truth: {
+      statement: 'Operational record',
+      evidence: [
+        { source_id: source.source_id, chunk_id: source.chunks[0].chunk_id },
+      ],
+    },
+    decision_trail: [
+      {
+        label: 'Inspect operational evidence',
+        evidence: [
+          { source_id: source.source_id, chunk_id: source.chunks[0].chunk_id },
+        ],
+      },
+    ],
+  });
+  assert.equal(result.status, 201, JSON.stringify(result.body));
+  assert.equal(
+    (await request(`/v1/inquiries/${key}`, employee)).body.decision_trail
+      .length,
+    1,
+  );
+  await request(
+    `/v1/sources/${source.source_id}/permissions`,
+    admin,
+    { permissions: [] },
+    'PUT',
+  );
+  assert.equal((await request(`/v1/inquiries/${key}`, employee)).status, 404);
+});

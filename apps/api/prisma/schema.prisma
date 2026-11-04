@@ -208,6 +208,7 @@ model Inquiry {
   question          String
   status            InquiryStatus @default(PENDING)
   answer            String?
+  structuredAnswer  Json?
   assumptions       String[] @default([])
   limitations       String[] @default([])
   permissionVersion Int

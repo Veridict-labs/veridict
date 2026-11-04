@@ -5,9 +5,18 @@ import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './auth/auth.module';
 import { KnowledgeModule } from './knowledge/knowledge.module';
 import { PolicyModule } from './policy/policy.module';
+import { InquiriesModule } from './inquiries/inquiries.module';
+import { FeedbackModule } from './feedback/feedback.module';
 
 @Module({
-  imports: [DatabaseModule, AuthModule, KnowledgeModule, PolicyModule],
+  imports: [
+    DatabaseModule,
+    AuthModule,
+    KnowledgeModule,
+    PolicyModule,
+    InquiriesModule,
+    FeedbackModule,
+  ],
   controllers: [AppController],
   providers: [AppService],
 })
