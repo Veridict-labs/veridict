@@ -15,6 +15,11 @@ import { parse } from '../common/validation';
 export class KnowledgeController {
   constructor(private readonly knowledge: KnowledgeService) {}
   @Roles('ADMIN')
+  @Post('knowledge/preview')
+  preview(@CurrentActor() actor: Actor, @Body() body: unknown) {
+    return this.knowledge.preview(actor, parse(ingestInput, body));
+  }
+  @Roles('ADMIN')
   @Post('knowledge/ingest')
   ingest(@CurrentActor() actor: Actor, @Body() body: unknown) {
     return this.knowledge.ingest(actor, parse(ingestInput, body));

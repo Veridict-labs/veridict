@@ -12,7 +12,7 @@ import type {
 import type { Actor } from '../auth/actor';
 import { SecurityService } from '../auth/security.service';
 import { AuditService, digest } from '../audit/audit.service';
-import { evidence, normalize, splitContent } from './content';
+import { evidence, maskPII, normalize, splitContent } from './content';
 
 @Injectable()
 export class KnowledgeService {
@@ -64,7 +64,9 @@ export class KnowledgeService {
           !previous ||
           input.version !== previous.version + 1 ||
           input.state !== 'APPROVED' ||
-          !input.valid_from
+          !input.valid_from ||
+          (previous.validFrom &&
+            new Date(input.valid_from) < previous.validFrom)
         )
           throw new BadRequestException('Invalid source version chain');
       }
@@ -150,6 +152,25 @@ export class KnowledgeService {
         { type: source.type, chunk_count: chunks.length },
       );
       return { source_id: source.id, chunks: result };
+    });
+  }
+
+  preview(actor: Actor, input: IngestInput) {
+    return this.security.scope(actor, false, async (tx) => {
+      this.security.requireAdmin(actor);
+      const chunks = splitContent(normalize(input));
+      await this.audit.record(tx, actor, 'INGESTION_PREVIEWED', [], 'ALLOWED', {
+        chunk_count: chunks.length,
+      });
+      return {
+        chunks: chunks.map((c) => ({
+          chunk_index: c.chunkIndex,
+          content: maskPII(c.content),
+          span_start: c.spanStart,
+          span_end: c.spanEnd,
+          integrity_hash: c.integrityHash,
+        })),
+      };
     });
   }
 
