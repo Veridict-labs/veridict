@@ -1705,6 +1705,76 @@ test('personal-data annotations are masked across overlapping chunk boundaries',
   );
 });
 
+test('shared demo fixtures seed reproducible policies, permissions and privacy scenarios', async () => {
+  const { seedDemo } = require('../dist/demo/seed-demo');
+  const seeded = await seedDemo(app, { slug: 'shared-demo-test', password });
+  assert.equal(seeded.synthetic, true);
+  assert.equal(seeded.scenarios.length, 7);
+  const demoEmployee = await login('employee@example.test', seeded.org_slug);
+  assert.deepEqual(
+    (await request('/v1/knowledge/search', demoEmployee, { query: 'Kenari' }))
+      .body.results,
+    [],
+  );
+  const fuel = await request('/v1/policies/resolve', demoEmployee, {
+    domain: 'fuel',
+    context: {},
+  });
+  assert.equal(fuel.body.applicable[0].result, 'Rp750000');
+  const history = await request('/v1/truth/reconcile', demoEmployee, {
+    domain: 'procurement',
+    context: { type: 'saas', amount: 180000000 },
+    max_results: 30,
+  });
+  assert.equal(history.body.operational_truth.comparable_sample_size, 26);
+  assert.equal(
+    history.body.operational_truth.authority_pattern.find(
+      (p) => p.authority === 'VP',
+    ).count,
+    23,
+  );
+  assert.equal(history.body.gap_flag, true);
+  const types = new Set(
+    (
+      await request('/v1/knowledge/search', demoEmployee, {
+        query: 'onboarding',
+      })
+    ).body.results.map((r) => r.source_type),
+  );
+  assert.equal(types.size, 3);
+  assert.equal(
+    (await request('/v1/escalations/resolve', demoEmployee, { domain: 'fuel' }))
+      .body.status,
+    'AVAILABLE',
+  );
+  for (const key of ['phone_allowed', 'nik_denied']) {
+    const scenario = seeded.scenarios.find((s) => s.key === key);
+    const inquiry = await request('/v1/inquiries', demoEmployee, {
+      question: scenario.question,
+      personal_data_request: scenario.personal_data_request,
+    });
+    assert.equal(inquiry.status, 201, JSON.stringify(inquiry.body));
+    const target = scenario.personal_data_request;
+    const result = await request(
+      `/v1/sources/${target.source_id}/personal-data`,
+      demoEmployee,
+      { inquiry_id: inquiry.body.inquiry_id, chunk_id: target.chunk_id },
+    );
+    assert.equal(
+      result.status,
+      key === 'phone_allowed' ? 201 : 404,
+      JSON.stringify(result.body),
+    );
+  }
+  await assert.rejects(() =>
+    seedDemo(app, { slug: seeded.org_slug, password }),
+  );
+  assert.equal(
+    await db.organization.count({ where: { slug: seeded.org_slug } }),
+    1,
+  );
+});
+
 test('last admin protection and deactivation revoke user and agent sessions immediately', async () => {
   const current = await request('/v1/auth/me', admin);
   assert.equal(

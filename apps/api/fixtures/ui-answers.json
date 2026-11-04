@@ -1,0 +1,59 @@
+{
+  "synthetic": true,
+  "live": false,
+  "description": "Frontend mock payloads only. UUIDs are placeholders; use the seed manifest for live evidence IDs. These are not measured agent outputs.",
+  "answers": {
+    "fuel_conflict": {
+      "status": "ANSWERED",
+      "answer": "Tunjangan bensin bulanan yang berlaku adalah Rp750000. Pembaruan HR yang disetujui menggantikan SOP Rp500000.",
+      "citations": [
+        {
+          "source_id": "00000000-0000-4000-8000-000000000001",
+          "chunk_id": "00000000-0000-4000-8000-000000000002"
+        },
+        {
+          "source_id": "00000000-0000-4000-8000-000000000003",
+          "chunk_id": "00000000-0000-4000-8000-000000000004"
+        }
+      ],
+      "official_truth": {
+        "statement": "Rp750000 under the approved HR update.",
+        "evidence": [
+          {
+            "source_id": "00000000-0000-4000-8000-000000000003",
+            "chunk_id": "00000000-0000-4000-8000-000000000004"
+          }
+        ]
+      },
+      "decision_trail": [
+        {
+          "label": "Compare the old SOP with the authorized replacement.",
+          "evidence": [
+            {
+              "source_id": "00000000-0000-4000-8000-000000000001",
+              "chunk_id": "00000000-0000-4000-8000-000000000002"
+            },
+            {
+              "source_id": "00000000-0000-4000-8000-000000000003",
+              "chunk_id": "00000000-0000-4000-8000-000000000004"
+            }
+          ]
+        }
+      ],
+      "limitations": ["Synthetic UI fixture; no agent was executed."]
+    },
+    "missing": {
+      "status": "INSUFFICIENT_EVIDENCE",
+      "answer": "I do not have enough evidence to answer. Please contact the authorized domain owner if available.",
+      "citations": [],
+      "escalation_domain": "fuel",
+      "limitations": ["Synthetic UI fixture; no agent was executed."]
+    },
+    "unavailable": {
+      "status": "UNAVAILABLE",
+      "answer": "Informasi tidak tersedia untuk menjawab pertanyaan ini.",
+      "citations": [],
+      "limitations": ["Synthetic UI fixture; no agent was executed."]
+    }
+  }
+}

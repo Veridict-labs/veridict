@@ -1,0 +1,267 @@
+{
+  "version": 1,
+  "synthetic": true,
+  "users": [
+    {
+      "key": "admin",
+      "email": "admin@example.test",
+      "name": "Demo Admin",
+      "role": "ADMIN",
+      "department": "HR",
+      "review_domains": []
+    },
+    {
+      "key": "employee",
+      "email": "employee@example.test",
+      "name": "Demo Employee",
+      "role": "EMPLOYEE",
+      "department": "Operations",
+      "review_domains": []
+    },
+    {
+      "key": "reviewer",
+      "email": "reviewer@example.test",
+      "name": "Demo HR Owner",
+      "role": "REVIEWER",
+      "department": "HR",
+      "review_domains": ["fuel", "procurement"]
+    },
+    {
+      "key": "executive",
+      "email": "executive@example.test",
+      "name": "Demo Executive",
+      "role": "EMPLOYEE",
+      "department": "Executive",
+      "review_domains": []
+    }
+  ],
+  "sources": [
+    {
+      "key": "fuel_old",
+      "visibility": "ORGANIZATION",
+      "input": {
+        "type": "DOCUMENT",
+        "title": "Old fuel SOP",
+        "state": "APPROVED",
+        "valid_from": "2026-01-01T00:00:00Z",
+        "content": "Onboarding reimbursement: the monthly fuel allowance is Rp500000."
+      }
+    },
+    {
+      "key": "fuel_new",
+      "visibility": "ORGANIZATION",
+      "supersedes_key": "fuel_old",
+      "input": {
+        "type": "CHAT",
+        "title": "Authorized HR fuel update",
+        "state": "APPROVED",
+        "version": 2,
+        "valid_from": "2026-02-01T00:00:00Z",
+        "records": [
+          {
+            "text": "Onboarding reimbursement: the monthly fuel allowance is Rp750000. This approved HR notice replaces the old SOP.",
+            "author": "Demo HR",
+            "reference": "synthetic-hr-message-1"
+          }
+        ]
+      }
+    },
+    {
+      "key": "onboarding_task",
+      "visibility": "ORGANIZATION",
+      "input": {
+        "type": "TASK",
+        "title": "Onboarding reimbursement task",
+        "records": [
+          {
+            "text": "Onboarding reimbursement: submit the receipt using the internal reimbursement form.",
+            "reference": "synthetic-task-1"
+          }
+        ]
+      }
+    },
+    {
+      "key": "kenari",
+      "visibility": "EXECUTIVE",
+      "input": {
+        "type": "DOCUMENT",
+        "title": "Synthetic Kenari project",
+        "content": "Kenari confidential project planning. This fictional record is restricted to Executive."
+      }
+    },
+    {
+      "key": "procurement",
+      "visibility": "ORGANIZATION",
+      "input": {
+        "type": "DOCUMENT",
+        "title": "SaaS renewal approval policy",
+        "state": "APPROVED",
+        "valid_from": "2026-01-01T00:00:00Z",
+        "content": "Director approval is required for SaaS renewals above Rp100M."
+      }
+    },
+    {
+      "key": "ledger",
+      "visibility": "ORGANIZATION",
+      "input": {
+        "type": "DOCUMENT",
+        "title": "Synthetic renewal ledger",
+        "content": "Synthetic history: 23 of 26 comparable SaaS renewals were approved by VP; 3 were approved by Director. These are fixtures, not measured company outcomes."
+      }
+    },
+    {
+      "key": "directory",
+      "visibility": "ORGANIZATION",
+      "input": {
+        "type": "DOCUMENT",
+        "title": "Published HR contact directory",
+        "content": "Demo HR Owner handles fuel and reimbursement questions. Business contact: hr-owner@example.test."
+      }
+    },
+    {
+      "key": "profile",
+      "visibility": "EMPLOYEE",
+      "tagged_values": [
+        { "field_type": "NAME", "value": "Demo Private Person" },
+        { "field_type": "ADDRESS", "value": "Jalan Contoh 123" },
+        {
+          "field_type": "HEALTH_INFORMATION",
+          "value": "Fictional benefit eligibility detail"
+        }
+      ],
+      "input": {
+        "type": "DOCUMENT",
+        "title": "Fictional personal profile",
+        "content": "Name: Demo Private Person\nPhone: +62 800-0000-0000\nEmail: fictional.person@example.test\nNIK: 0000000000000000\nAddress: Jalan Contoh 123\nDOB: 1995-03-14\nBank account: 000111222333\nHealth: Fictional benefit eligibility detail"
+      }
+    }
+  ],
+  "policies": [
+    {
+      "key": "fuel_old",
+      "source_key": "fuel_old",
+      "domain": "fuel",
+      "predicate": {},
+      "result": "Rp500000",
+      "authority": "HR",
+      "valid_from": "2026-01-01T00:00:00Z"
+    },
+    {
+      "key": "fuel_new",
+      "source_key": "fuel_new",
+      "supersedes_key": "fuel_old",
+      "domain": "fuel",
+      "predicate": {},
+      "result": "Rp750000",
+      "authority": "HR",
+      "valid_from": "2026-02-01T00:00:00Z"
+    },
+    {
+      "key": "procurement",
+      "source_key": "procurement",
+      "domain": "procurement",
+      "predicate": { "type": "saas", "amount_min": 100000001 },
+      "result": "Director approval is required",
+      "authority": "Director",
+      "valid_from": "2026-01-01T00:00:00Z"
+    }
+  ],
+  "precedents": {
+    "source_key": "ledger",
+    "domain": "procurement",
+    "context": { "type": "saas", "amount": 180000000 },
+    "distribution": [
+      { "authority": "VP", "count": 23 },
+      { "authority": "Director", "count": 3 }
+    ]
+  },
+  "domain_owners": [
+    {
+      "domain": "fuel",
+      "owner_key": "reviewer",
+      "source_key": "directory",
+      "contact_email": "hr-owner@example.test"
+    }
+  ],
+  "personal_data_grants": [
+    {
+      "source_key": "profile",
+      "subject_key": "employee",
+      "field_type": "PHONE",
+      "purpose": "CONTACT_PERSON"
+    }
+  ],
+  "scenarios": [
+    {
+      "key": "fuel_conflict",
+      "actor_key": "employee",
+      "question": "Berapa tunjangan bensin bulanan yang berlaku?",
+      "expected": {
+        "policy_status": "SUPPORTED",
+        "official_result": "Rp750000",
+        "citations": ["fuel_old", "fuel_new"]
+      }
+    },
+    {
+      "key": "restricted",
+      "actor_key": "employee",
+      "question": "Apa perkembangan proyek Kenari?",
+      "expected": {
+        "search_query": "Kenari",
+        "result_count": 0,
+        "no_existence_hint": true
+      }
+    },
+    {
+      "key": "missing",
+      "actor_key": "employee",
+      "question": "What is the quantum-travel allowance?",
+      "expected": {
+        "status": "INSUFFICIENT_EVIDENCE",
+        "escalation_domain": "fuel"
+      }
+    },
+    {
+      "key": "reconciliation",
+      "actor_key": "employee",
+      "question": "Siapa approver untuk SaaS renewal Rp180 juta, and what happened before?",
+      "expected": {
+        "official_authority": "Director",
+        "vp_count": 23,
+        "sample_size": 26,
+        "gap_flag": true
+      }
+    },
+    {
+      "key": "multi_source",
+      "actor_key": "employee",
+      "question": "Give me an onboarding reimbursement summary with sources.",
+      "expected": {
+        "search_query": "onboarding",
+        "source_types": ["DOCUMENT", "CHAT", "TASK"]
+      }
+    },
+    {
+      "key": "phone_allowed",
+      "actor_key": "employee",
+      "question": "Berapa nomor telepon untuk saya hubungi?",
+      "personal_data_request": {
+        "source_key": "profile",
+        "field_type": "PHONE",
+        "purpose": "CONTACT_PERSON"
+      },
+      "expected": { "disclosure": "ALLOWED", "other_fields_masked": true }
+    },
+    {
+      "key": "nik_denied",
+      "actor_key": "employee",
+      "question": "Berapa NIK untuk verifikasi identitas?",
+      "personal_data_request": {
+        "source_key": "profile",
+        "field_type": "NIK",
+        "purpose": "VERIFY_IDENTITY"
+      },
+      "expected": { "disclosure": "UNAVAILABLE" }
+    }
+  ]
+}

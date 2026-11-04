@@ -51,3 +51,12 @@ test('automatic patterns protect email and labelled identifiers; NIK cannot beco
     /person@example.test|1995-03-14|000111222333|0812345678901234/,
   );
 });
+
+test('shared UI answer mocks conform to the real answer contract', () => {
+  const { answerInput } = require('@veridict/contracts');
+  const mocks = require('../fixtures/ui-answers.json');
+  assert.equal(mocks.synthetic, true);
+  assert.equal(mocks.live, false);
+  for (const answer of Object.values(mocks.answers))
+    assert.equal(answerInput.safeParse(answer).success, true);
+});
