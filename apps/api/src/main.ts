@@ -1,12 +1,10 @@
 import 'dotenv/config';
 import 'reflect-metadata';
-import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
+import { createApplication } from './application';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
-  app.enableCors({ origin: process.env.WEB_ORIGIN ?? 'http://localhost:3000' });
+  const app = await createApplication();
   await app.listen(Number(process.env.PORT ?? 3001));
 }
 
-void bootstrap();
+void bootstrap().catch(() => { console.error('API startup failed. Check database connectivity and configuration.'); process.exitCode = 1; });
