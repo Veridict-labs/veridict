@@ -10,7 +10,6 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "predev": "npm run build -w @veridict/contracts && npm run db:generate",
     "dev": "concurrently -k -n web,api -c cyan,green \"npm run dev -w @veridict/web\" \"npm run dev -w @veridict/api\"",
     "dev:web": "npm run dev -w @veridict/web",
     "dev:api": "npm run dev -w @veridict/api",

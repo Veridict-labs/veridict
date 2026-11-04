@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "nest start --watch",
+    "predev": "npm run build -w @veridict/contracts && prisma generate",
     "prebuild": "npm run build -w @veridict/contracts && prisma generate",
     "build": "nest build",
     "start": "node dist/main.js",
