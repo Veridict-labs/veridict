@@ -104,6 +104,8 @@ model Session {
   kind      SessionKind @default(USER)
   expiresAt DateTime
   createdAt DateTime @default(now())
+  inquiryId String? @db.Uuid
+  inquiry   Inquiry? @relation(fields: [inquiryId], references: [id], onDelete: Cascade)
   @@index([userId, expiresAt])
 }
 
@@ -220,6 +222,8 @@ model Inquiry {
   updatedAt         DateTime @updatedAt
   evidence          InquiryEvidence[]
   feedback          FeedbackEvent[]
+  sessions          Session[]
+  audits            AuditEvent[]
   @@index([orgId, askerId, createdAt])
 }
 
@@ -260,8 +264,12 @@ model AuditEvent {
   resourceRefs String[] @default([])
   decision     String
   metadata     Json
+  inquiryId    String? @db.Uuid
+  inquiry      Inquiry? @relation(fields: [inquiryId], references: [id], onDelete: SetNull)
+  toolCallId   String? @db.Uuid
   createdAt    DateTime @default(now())
   @@index([orgId, createdAt])
+  @@index([orgId, inquiryId, createdAt])
 }
 
 model DomainOwner {

@@ -29,12 +29,14 @@ async function request(
   token,
   body,
   method = body === undefined ? 'GET' : 'POST',
+  extraHeaders = {},
 ) {
   const response = await fetch(`${url}${route}`, {
     method,
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      ...extraHeaders,
     },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
@@ -1074,6 +1076,158 @@ test('domain-owner escalation respects source ACL and is attached to insufficien
     'UNAVAILABLE',
   );
   assert.equal((await request(`/v1/inquiries/${key}`, employee)).status, 404);
+});
+
+test('inquiry-bound MCP sessions correlate tool activity and reject a different inquiry', async () => {
+  const source = await ingest({
+    type: 'DOCUMENT',
+    title: 'Trace fixture',
+    content: 'Tracealpha decision evidence.',
+    permissions: [{ subject_type: 'USER', subject_id: employeeId }],
+  });
+  const inquiry = await request('/v1/inquiries', employee, {
+    question: 'Explain Tracealpha',
+  });
+  const other = await request('/v1/inquiries', employee, {
+    question: 'Another question',
+  });
+  const key = inquiry.body.inquiry_id;
+  const token = (
+    await request('/v1/auth/tool-token', employee, { inquiry_id: key })
+  ).body.access_token;
+  const {
+    Client: McpClient,
+  } = require('@modelcontextprotocol/sdk/client/index.js');
+  const {
+    StreamableHTTPClientTransport,
+  } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
+  const client = new McpClient({
+    name: 'inquiry-trace-test',
+    version: '1.0.0',
+  });
+  try {
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(`${url}/mcp`), {
+        requestInit: { headers: { Authorization: `Bearer ${token}` } },
+      }),
+    );
+    assert.ok(
+      !(
+        await client.callTool({
+          name: 'search_authorized_knowledge',
+          arguments: { query: 'Tracealpha' },
+        })
+      ).isError,
+    );
+    const denied = await client.callTool({
+      name: 'get_evidence',
+      arguments: {
+        source_id: secret.source_id,
+        chunk_id: secret.chunks[0].chunk_id,
+      },
+    });
+    assert.equal(denied.isError, true);
+    const wrong = await client.callTool({
+      name: 'search_authorized_knowledge',
+      arguments: { query: 'Tracealpha', inquiry_id: other.body.inquiry_id },
+    });
+    assert.equal(wrong.isError, true);
+    const answer = await client.callTool({
+      name: 'complete_inquiry',
+      arguments: {
+        inquiry_id: key,
+        status: 'ANSWERED',
+        answer: 'The cited decision is Tracealpha.',
+        citations: [
+          { source_id: source.source_id, chunk_id: source.chunks[0].chunk_id },
+        ],
+      },
+    });
+    assert.ok(!answer.isError, JSON.stringify(answer));
+  } finally {
+    await client.close();
+  }
+  const trace = await request(`/v1/inquiries/${key}/trace?limit=100`, employee);
+  assert.equal(trace.status, 200, JSON.stringify(trace.body));
+  const events = trace.body.results;
+  assert.ok(events.some((e) => e.event_type === 'INQUIRY_CREATED'));
+  assert.ok(events.some((e) => e.event_type === 'INQUIRY_ANSWERED'));
+  assert.ok(
+    events.some(
+      (e) =>
+        e.event_type === 'KNOWLEDGE_SEARCH' &&
+        e.resource_refs.includes(source.source_id),
+    ),
+  );
+  assert.ok(events.some((e) => e.event_type === 'MCP_TOOL_DENIED'));
+  for (const start of events.filter((e) => e.event_type === 'MCP_TOOL_STARTED'))
+    assert.ok(
+      events.some(
+        (e) =>
+          e.tool_call_id === start.tool_call_id &&
+          ['MCP_TOOL_COMPLETED', 'MCP_TOOL_DENIED'].includes(e.event_type),
+      ),
+    );
+  assert.doesNotMatch(JSON.stringify(events), new RegExp(secret.source_id));
+  assert.equal(
+    (await request(`/v1/inquiries/${key}/trace`, outsider)).status,
+    404,
+  );
+  assert.equal(
+    (await request('/v1/auth/tool-token', reviewer, { inquiry_id: key }))
+      .status,
+    404,
+  );
+  const audit = await request(`/v1/audit?inquiry_id=${key}&limit=100`, admin);
+  assert.ok(audit.body.results.every((e) => e.inquiryId === key));
+});
+
+test('REST inquiry context is owner-checked and trace references are reauthorized', async () => {
+  const inquiry = await request('/v1/inquiries', employee, {
+    question: 'Pending trace question',
+  });
+  const key = inquiry.body.inquiry_id;
+  const source = await ingest({
+    type: 'DOCUMENT',
+    title: 'Trace revocation fixture',
+    content: 'Tracebeta record.',
+    permissions: [{ subject_type: 'USER', subject_id: employeeId }],
+  });
+  assert.equal(
+    (
+      await request(
+        '/v1/knowledge/search',
+        employee,
+        { query: 'Tracebeta' },
+        'POST',
+        { 'X-Inquiry-ID': key },
+      )
+    ).status,
+    201,
+  );
+  assert.equal(
+    (
+      await request(
+        '/v1/knowledge/search',
+        outsider,
+        { query: 'Tracebeta' },
+        'POST',
+        { 'X-Inquiry-ID': key },
+      )
+    ).status,
+    404,
+  );
+  const before = await request(`/v1/inquiries/${key}/trace`, employee);
+  assert.match(JSON.stringify(before.body), new RegExp(source.source_id));
+  await request(
+    `/v1/sources/${source.source_id}/permissions`,
+    admin,
+    { permissions: [] },
+    'PUT',
+  );
+  const after = await request(`/v1/inquiries/${key}/trace`, employee);
+  assert.equal(after.status, 200);
+  assert.doesNotMatch(JSON.stringify(after.body), new RegExp(source.source_id));
 });
 
 test('last admin protection and deactivation revoke user and agent sessions immediately', async () => {

@@ -15,6 +15,7 @@ import {
   type Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
+import { randomUUID } from 'node:crypto';
 import {
   answerInput,
   evidenceInput,
@@ -33,7 +34,7 @@ import { PolicyService } from '../policy/policy.service';
 import { FeedbackService } from '../feedback/feedback.service';
 import { InquiriesService } from '../inquiries/inquiries.service';
 import { parse } from '../common/validation';
-import { AuditService } from '../audit/audit.service';
+import { AuditService, digest } from '../audit/audit.service';
 import { SecurityService } from '../auth/security.service';
 import { EscalationsService } from '../escalations/escalations.service';
 
@@ -44,6 +45,20 @@ type ToolDefinition = {
   readOnly: boolean;
   run: (actor: Actor, input: unknown) => Promise<unknown>;
 };
+
+function correlatedSchema(schema: z.ZodType): Tool['inputSchema'] {
+  const json = z.toJSONSchema(schema) as Tool['inputSchema'];
+  return {
+    ...json,
+    properties: {
+      ...json.properties,
+      inquiry_id: json.properties?.inquiry_id ?? {
+        type: 'string',
+        format: 'uuid',
+      },
+    },
+  };
+}
 
 @Controller('mcp')
 export class McpController {
@@ -160,7 +175,7 @@ export class McpController {
       tools: definitions.map((t) => ({
         name: t.name,
         description: t.description,
-        inputSchema: z.toJSONSchema(t.schema) as Tool['inputSchema'],
+        inputSchema: correlatedSchema(t.schema),
         annotations: {
           readOnlyHint: t.readOnly,
           destructiveHint: false,
@@ -170,26 +185,51 @@ export class McpController {
     }));
     server.setRequestHandler(CallToolRequestSchema, async (call) => {
       const tool = definitions.find((t) => t.name === call.params.name);
-      if (!tool)
+      let actor = await this.auth.authenticate(token);
+      const args = call.params.arguments ?? {};
+      try {
+        if (request.actor.inquiryId)
+          actor = this.security.forInquiry(actor, request.actor.inquiryId);
+        if (args.inquiry_id !== undefined)
+          actor = this.security.forInquiry(actor, parse(id, args.inquiry_id));
+        actor = { ...actor, toolCallId: randomUUID() };
+        await this.security.scope(actor, false, (tx) =>
+          this.audit.record(tx, actor, 'MCP_TOOL_STARTED', [], 'STARTED', {
+            tool: tool?.name ?? 'UNKNOWN_TOOL',
+          }),
+        );
+      } catch {
         return {
           isError: true,
           content: [
-            { type: 'text', text: JSON.stringify({ error: 'UNKNOWN_TOOL' }) },
+            {
+              type: 'text',
+              text: JSON.stringify({
+                error: 'UNAVAILABLE',
+                message: 'Tool request could not be completed',
+              }),
+            },
           ],
         };
+      }
       try {
-        // Recheck the token per invocation, including batched calls. Never capture
-        // an actor from a previous request or reuse a shared administrator session.
-        const actor = await this.auth.authenticate(token);
-        const result = await tool.run(actor, call.params.arguments ?? {});
+        if (!tool) throw new Error('Unknown tool');
+        const input = { ...args };
+        if (!['submit_feedback', 'complete_inquiry'].includes(tool.name))
+          delete input.inquiry_id;
+        const result = await tool.run(actor, input);
+        await this.audit.toolOutcome(
+          actor,
+          tool.name,
+          'ALLOWED',
+          digest(JSON.stringify(result)),
+        );
         return { content: [{ type: 'text', text: JSON.stringify(result) }] };
       } catch {
-        // All denied/missing resources use the same external tool result.
-        const actor = await this.auth.authenticate(token);
-        await this.security.scope(actor, false, (tx) =>
-          this.audit.record(tx, actor, 'MCP_TOOL_DENIED', [], 'UNAVAILABLE', {
-            tool: tool.name,
-          }),
+        await this.audit.toolOutcome(
+          actor,
+          tool?.name ?? 'UNKNOWN_TOOL',
+          'UNAVAILABLE',
         );
         return {
           isError: true,

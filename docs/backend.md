@@ -117,6 +117,12 @@ The server is stateless between HTTP requests and verifies identity per invocati
 
 Contacts are visible only while their directory evidence is readable. Restricted and missing entries return the same `{ status: "UNAVAILABLE", owner: null, evidence: null }`. Setting `escalation_domain` on an INSUFFICIENT_EVIDENCE answer adds a freshly authorized `escalation` to the inquiry response and includes its directory evidence in stored-answer revocation. Mapping updates/removal mark affected answers for revalidation. A business-email directory entry does not grant policy authority or permission to reveal personal phone numbers.
 
+## Inquiry audit correlation
+
+Issue an agent token with `POST /v1/auth/tool-token` and `{ "inquiry_id": "..." }` to bind it to one currently accessible inquiry owned by the user. The token cannot switch inquiries. Existing unbound tokens remain supported for standalone searches. REST callers can attach `X-Inquiry-ID`; MCP tools accept an optional `inquiry_id` when the token is unbound. Both paths verify ownership and current evidence access before performing the operation.
+
+MCP invocations receive server-generated `tool_call_id` values. Accepted invocations log STARTED and COMPLETED/DENIED events; service events share their inquiry/tool-call context. Result text is hashed in audit rather than copied. `GET /v1/inquiries/:id/trace` exposes the owner's paginated trace with source/chunk references filtered by current READ access. Administrators can filter their organization audit using `/v1/audit?inquiry_id=...`. Requests with invalid context are rejected before business operations. A complete agent trace requires a bound token or an explicit inquiry context; the server never guesses from a user's most recent question.
+
 ## Operations and verification
 
 Business responses use `Cache-Control: no-store`. ACL writes take an exclusive organization lock; protected operations take a shared lock and revalidate identity. Completed revocations affect subsequent operations. Source replacements invalidate dependent answers; time-based changes are checked when opening an inquiry. A new answer can still cite old and new sources to explain their conflict.

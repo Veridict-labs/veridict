@@ -7,6 +7,15 @@ import { InquiriesService } from './inquiries.service';
 @Controller('v1/inquiries')
 export class InquiriesController {
   constructor(private readonly inquiries: InquiriesService) {}
+  @Get(':id/trace')
+  trace(
+    @CurrentActor() actor: Actor,
+    @Param('id') inquiryId: string,
+    @Query() query: unknown,
+  ) {
+    const p = parse(pageInput, query);
+    return this.inquiries.trace(actor, parse(id, inquiryId), p.limit, p.cursor);
+  }
   @Post()
   create(@CurrentActor() actor: Actor, @Body() body: unknown) {
     return this.inquiries.create(actor, parse(inquiryInput, body).question);

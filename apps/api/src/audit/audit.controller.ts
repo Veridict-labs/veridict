@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Post, Query } from '@nestjs/common';
 import { z } from 'zod';
-import { pageInput } from '@veridict/contracts';
+import { pageInput, id } from '@veridict/contracts';
 import { CurrentActor, Roles, type Actor } from '../auth/actor';
 import { SecurityService } from '../auth/security.service';
 import { AuditService } from './audit.service';
@@ -15,11 +15,11 @@ export class AuditController {
   ) {}
   @Get()
   list(@CurrentActor() actor: Actor, @Query() query: unknown) {
-    const page = parse(pageInput, query);
+    const page = parse(pageInput.extend({ inquiry_id: id.optional() }), query);
     return this.security.scope(actor, false, async (tx) => {
       this.security.requireAdmin(actor);
       const results = await tx.auditEvent.findMany({
-        where: { orgId: actor.orgId },
+        where: { orgId: actor.orgId, inquiryId: page.inquiry_id },
         orderBy: { id: 'asc' },
         take: page.limit,
         ...(page.cursor ? { cursor: { id: page.cursor }, skip: 1 } : {}),

@@ -95,6 +95,7 @@ export class InquiriesService {
         [inquiry.id],
         'PENDING',
         { question_hash: digest(question) },
+        inquiry.id,
       );
       return {
         inquiry_id: inquiry.id,
@@ -105,6 +106,7 @@ export class InquiriesService {
     });
   }
   get(actor: Actor, inquiryId: string) {
+    actor = this.security.forInquiry(actor, inquiryId);
     return this.security.scope(actor, false, async (tx) => {
       const inquiry = await this.visible(tx, actor, inquiryId);
       const stale = inquiry.status === 'NEEDS_REVALIDATION';
@@ -180,6 +182,7 @@ export class InquiriesService {
     });
   }
   answer(actor: Actor, inquiryId: string, input: AnswerInput) {
+    actor = this.security.forInquiry(actor, inquiryId);
     if (actor.sessionKind !== 'AGENT')
       throw new ForbiddenException('A delegated agent session is required');
     return this.security.scope(actor, true, async (tx) => {
@@ -242,6 +245,45 @@ export class InquiriesService {
         { answer_hash: digest(input.answer) },
       );
       return { inquiry_id: inquiryId, status: input.status };
+    });
+  }
+
+  trace(actor: Actor, inquiryId: string, limit: number, cursor?: string) {
+    actor = this.security.forInquiry(actor, inquiryId);
+    return this.security.scope(actor, false, async (tx) => {
+      const rows = await tx.auditEvent.findMany({
+        where: { orgId: actor.orgId, inquiryId },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        take: limit,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+      const refs = [...new Set(rows.flatMap((r) => r.resourceRefs))];
+      const sources = await tx.knowledgeSource.findMany({
+        where: { id: { in: refs }, ...this.security.sourceWhere(actor) },
+        select: { id: true },
+      });
+      const chunks = await tx.sourceChunk.findMany({
+        where: { id: { in: refs }, source: this.security.sourceWhere(actor) },
+        select: { id: true },
+      });
+      const allowed = new Set([
+        inquiryId,
+        ...sources.map((s) => s.id),
+        ...chunks.map((c) => c.id),
+      ]);
+      return {
+        inquiry_id: inquiryId,
+        results: rows.map((r) => ({
+          event_id: r.id,
+          event_type: r.eventType,
+          tool_call_id: r.toolCallId,
+          decision: r.decision,
+          resource_refs: r.resourceRefs.filter((id) => allowed.has(id)),
+          metadata: r.metadata,
+          created_at: r.createdAt,
+        })),
+        next_cursor: rows.length === limit ? rows.at(-1)!.id : null,
+      };
     });
   }
 }
