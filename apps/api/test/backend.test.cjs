@@ -374,3 +374,192 @@ test('delegated tool sessions cannot create users or issue more tool sessions', 
   assert.equal((await request('/v1/auth/logout', token, {})).status, 201);
   assert.equal((await request('/v1/auth/me', token)).status, 401);
 });
+
+test('approved policy supersession resolves current and historical rules deterministically', async () => {
+  const old = await request('/v1/policies', admin, {
+    evidence_chunk_id: document.chunks[0].chunk_id,
+    domain: 'fuel',
+    predicate: {},
+    result: 'Rp500000',
+    authority: 'HR',
+    valid_from: '2026-01-01T00:00:00Z',
+  });
+  assert.equal(old.status, 201, JSON.stringify(old.body));
+  const me = await request('/v1/auth/me', admin);
+  const newer = await ingest({
+    type: 'CHAT',
+    title: 'Approved HR fuel update',
+    state: 'APPROVED',
+    issuer_id: me.body.id,
+    version: 2,
+    supersedes_id: document.source_id,
+    valid_from: '2026-02-01T00:00:00Z',
+    records: [{ text: 'Fuel allowance is Rp750000.' }],
+    permissions: [{ subject_type: 'ORGANIZATION', subject_id: orgId }],
+  });
+  assert.equal(
+    (
+      await request('/v1/policies', admin, {
+        evidence_chunk_id: newer.chunks[0].chunk_id,
+        domain: 'fuel',
+        predicate: {},
+        result: 'Rp750000',
+        authority: 'HR',
+        valid_from: '2026-02-01T00:00:00Z',
+        supersedes_id: old.body.claim_id,
+      })
+    ).status,
+    201,
+  );
+  const current = await request('/v1/policies/resolve', employee, {
+    domain: 'fuel',
+    context: {},
+    as_of: '2026-03-01T00:00:00Z',
+  });
+  assert.equal(current.body.status, 'SUPPORTED');
+  assert.equal(current.body.applicable[0].result, 'Rp750000');
+  assert.ok(
+    current.body.rejected.some((c) => c.reason === 'EXPLICITLY_SUPERSEDED'),
+  );
+  const historical = await request('/v1/policies/resolve', employee, {
+    domain: 'fuel',
+    context: {},
+    as_of: '2026-01-15T00:00:00Z',
+  });
+  assert.equal(historical.body.applicable[0].result, 'Rp500000');
+  assert.equal(
+    (
+      await request('/v1/policies', employee, {
+        evidence_chunk_id: newer.chunks[0].chunk_id,
+        domain: 'fuel',
+        predicate: {},
+        result: 'Rp750000',
+        authority: 'HR',
+        valid_from: '2026-02-01T00:00:00Z',
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await request('/v1/policies', admin, {
+        evidence_chunk_id: newer.chunks[0].chunk_id,
+        domain: 'fuel',
+        predicate: {},
+        result: 'Fabricated amount',
+        authority: 'HR',
+        valid_from: '2026-02-01T00:00:00Z',
+      })
+    ).status,
+    400,
+  );
+});
+
+test('policy-practice reconciliation retains Director authority despite 23 VP precedents', async () => {
+  const me = await request('/v1/auth/me', admin);
+  const source = await ingest({
+    type: 'DOCUMENT',
+    title: 'Procurement policy and synthetic case ledger',
+    state: 'APPROVED',
+    issuer_id: me.body.id,
+    content:
+      'Director approval is required for SaaS renewal above Rp100M. Synthetic ledger: 23 VP approvals and 3 Director approvals.',
+    permissions: [{ subject_type: 'ORGANIZATION', subject_id: orgId }],
+  });
+  const policy = await request('/v1/policies', admin, {
+    evidence_chunk_id: source.chunks[0].chunk_id,
+    domain: 'procurement',
+    predicate: { amount_min: 100000001, type: 'saas' },
+    result: 'Director approval is required',
+    authority: 'Director',
+    valid_from: '2026-01-01T00:00:00Z',
+  });
+  assert.equal(policy.status, 201, JSON.stringify(policy.body));
+  for (let i = 0; i < 26; i++) {
+    const result = await request('/v1/cases', admin, {
+      domain: 'procurement',
+      context: { type: 'saas', amount: 180000000 },
+      outcome: 'Approved',
+      authority: i < 23 ? 'VP' : 'Director',
+      evidence_chunk_ids: [source.chunks[0].chunk_id],
+    });
+    assert.equal(result.status, 201, JSON.stringify(result.body));
+  }
+  const result = await request('/v1/truth/reconcile', employee, {
+    domain: 'procurement',
+    context: { type: 'saas', amount: 180000000 },
+    max_results: 30,
+  });
+  assert.equal(result.status, 201, JSON.stringify(result.body));
+  assert.equal(result.body.official_truth.applicable[0].authority, 'Director');
+  assert.equal(result.body.gap_flag, true);
+  assert.equal(result.body.operational_truth.comparable_sample_size, 26);
+  assert.equal(
+    result.body.operational_truth.authority_pattern.find(
+      (p) => p.authority === 'VP',
+    ).count,
+    23,
+  );
+  const outsiderCases = await request('/v1/cases/search', outsider, {
+    domain: 'procurement',
+    context: {},
+  });
+  assert.deepEqual(outsiderCases.body.results, []);
+  await request(
+    `/v1/sources/${source.source_id}/permissions`,
+    admin,
+    { permissions: [] },
+    'PUT',
+  );
+  assert.deepEqual(
+    (
+      await request('/v1/cases/search', employee, {
+        domain: 'procurement',
+        context: {},
+      })
+    ).body.results,
+    [],
+  );
+  assert.equal(
+    (
+      await request('/v1/policies/resolve', employee, {
+        domain: 'procurement',
+        context: { type: 'saas', amount: 180000000 },
+      })
+    ).body.status,
+    'INSUFFICIENT_EVIDENCE',
+  );
+});
+
+test('equally applicable conflicting approved claims require review', async () => {
+  const me = await request('/v1/auth/me', admin);
+  for (const result of ['Rule A', 'Rule B']) {
+    const source = await ingest({
+      type: 'DOCUMENT',
+      title: result,
+      state: 'APPROVED',
+      issuer_id: me.body.id,
+      content: result,
+      permissions: [{ subject_type: 'ORGANIZATION', subject_id: orgId }],
+    });
+    assert.equal(
+      (
+        await request('/v1/policies', admin, {
+          evidence_chunk_id: source.chunks[0].chunk_id,
+          domain: 'conflict',
+          predicate: {},
+          result,
+          authority: 'HR',
+          valid_from: '2026-01-01T00:00:00Z',
+        })
+      ).status,
+      201,
+    );
+  }
+  const result = await request('/v1/policies/resolve', employee, {
+    domain: 'conflict',
+    context: {},
+  });
+  assert.equal(result.body.status, 'NEEDS_REVIEW');
+  assert.equal(result.body.applicable.length, 2);
+});
