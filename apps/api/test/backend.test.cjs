@@ -840,7 +840,7 @@ test('real MCP clients discover tools and remain isolated by the bearer token su
       }),
     );
     const listed = await first.listTools();
-    assert.equal(listed.tools.length, 8);
+    assert.equal(listed.tools.length, 9);
     assert.ok(
       listed.tools.some((t) => t.name === 'search_authorized_knowledge'),
     );
@@ -1228,6 +1228,481 @@ test('REST inquiry context is owner-checked and trace references are reauthorize
   const after = await request(`/v1/inquiries/${key}/trace`, employee);
   assert.equal(after.status, 200);
   assert.doesNotMatch(JSON.stringify(after.body), new RegExp(source.source_id));
+});
+
+test('personal-data disclosure requires original intent, READ and a category/purpose grant', async () => {
+  const phone = '+62 812-3456-7890';
+  const nik = '1234567890123456';
+  const source = await ingest({
+    type: 'DOCUMENT',
+    title: 'Private contact fixture',
+    content: `Contact phone: ${phone}. NIK ${nik}. Email: private.person@example.test`,
+    permissions: [{ subject_type: 'USER', subject_id: employeeId }],
+  });
+  const target = {
+    source_id: source.source_id,
+    chunk_id: source.chunks[0].chunk_id,
+  };
+  const personal = {
+    ...target,
+    field_type: 'PHONE',
+    purpose: 'CONTACT_PERSON',
+  };
+  assert.equal(
+    (
+      await request('/v1/inquiries', employee, {
+        question: 'Explain reimbursement policy',
+        personal_data_request: personal,
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await request('/v1/inquiries', employee, {
+        question: 'Jangan tampilkan nomor telepon',
+        personal_data_request: personal,
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await request('/v1/inquiries', employee, {
+        question: 'Berapa nomor telepon PIC?',
+        personal_data_request: { ...personal, purpose: 'VERIFY_IDENTITY' },
+      })
+    ).status,
+    400,
+  );
+  const inquiry = await request('/v1/inquiries', employee, {
+    question: 'Berapa nomor telepon PIC untuk saya hubungi?',
+    personal_data_request: personal,
+  });
+  const key = inquiry.body.inquiry_id;
+  assert.equal(inquiry.status, 201, JSON.stringify(inquiry.body));
+  const path = `/v1/sources/${source.source_id}/personal-data`;
+  const body = { inquiry_id: key, chunk_id: target.chunk_id };
+  assert.equal((await request(path, employee, body)).status, 404);
+  const grants = [
+    {
+      field_type: 'PHONE',
+      purpose: 'CONTACT_PERSON',
+      subject_type: 'USER',
+      subject_id: employeeId,
+    },
+  ];
+  assert.equal(
+    (
+      await request(
+        `/v1/sources/${source.source_id}/personal-data-grants`,
+        employee,
+        { grants },
+        'PUT',
+      )
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await request(
+        `/v1/sources/${source.source_id}/personal-data-grants`,
+        admin,
+        { grants },
+        'PUT',
+      )
+    ).status,
+    200,
+  );
+  const value = await request(path, employee, body);
+  assert.equal(value.body.value, phone);
+  assert.doesNotMatch(JSON.stringify(value.body), new RegExp(nik));
+  const normal = await request(
+    `/v1/sources/${source.source_id}/evidence?chunk_id=${target.chunk_id}`,
+    employee,
+  );
+  assert.doesNotMatch(
+    JSON.stringify(normal.body),
+    /812-3456|1234567890123456|private.person@example.test/,
+  );
+  const token = (
+    await request('/v1/auth/tool-token', employee, { inquiry_id: key })
+  ).body.access_token;
+  const {
+    Client: McpClient,
+  } = require('@modelcontextprotocol/sdk/client/index.js');
+  const {
+    StreamableHTTPClientTransport,
+  } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
+  const client = new McpClient({
+    name: 'personal-data-test',
+    version: '1.0.0',
+  });
+  try {
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(`${url}/mcp`), {
+        requestInit: { headers: { Authorization: `Bearer ${token}` } },
+      }),
+    );
+    const result = await client.callTool({
+      name: 'get_personal_data',
+      arguments: { inquiry_id: key, ...target },
+    });
+    assert.equal(JSON.parse(result.content[0].text).value, phone);
+  } finally {
+    await client.close();
+  }
+  const answer = await request(`/v1/inquiries/${key}/answer`, token, {
+    status: 'ANSWERED',
+    answer: `Phone: ${phone}. NIK: ${nik}.`,
+    citations: [target],
+  });
+  assert.equal(answer.status, 201, JSON.stringify(answer.body));
+  const displayed = await request(`/v1/inquiries/${key}`, employee);
+  assert.match(displayed.body.answer, /812-3456-7890/);
+  assert.doesNotMatch(displayed.body.answer, new RegExp(nik));
+  await request(
+    `/v1/sources/${source.source_id}/personal-data-grants`,
+    admin,
+    { grants: [] },
+    'PUT',
+  );
+  assert.equal((await request(path, employee, body)).status, 404);
+  assert.doesNotMatch(
+    (await request(`/v1/inquiries/${key}`, employee)).body.answer,
+    /812-3456-7890/,
+  );
+  const logs = await db.auditEvent.findMany({ where: { inquiryId: key } });
+  assert.ok(logs.some((e) => e.eventType === 'PERSONAL_DATA_DISCLOSED'));
+  assert.doesNotMatch(
+    JSON.stringify(logs),
+    /812-3456-7890|1234567890123456|private.person@example.test/,
+  );
+});
+
+test('annotation-based categories remain masked and can be disclosed independently', async () => {
+  const records = [
+    [
+      'EMAIL',
+      'CONTACT_PERSON',
+      'What is the email address?',
+      'private.employee@example.test',
+    ],
+    [
+      'ADDRESS',
+      'FULFILL_SERVICE',
+      'Tampilkan alamat untuk layanan pengiriman',
+      'Jalan Contoh 123',
+    ],
+    [
+      'DATE_OF_BIRTH',
+      'VERIFY_IDENTITY',
+      'What is the date of birth?',
+      '1995-03-14',
+    ],
+    [
+      'BANK_ACCOUNT',
+      'PROCESS_REIMBURSEMENT',
+      'Berapa nomor rekening untuk reimbursement?',
+      '000111222333',
+    ],
+    [
+      'NAME',
+      'IDENTIFY_PERSON',
+      'Tampilkan nama lengkap pegawai',
+      'Demo Private Person',
+    ],
+    [
+      'NPWP',
+      'TAX_ADMINISTRATION',
+      'Berapa NPWP untuk administrasi pajak?',
+      '00.000.000.0-000.000',
+    ],
+    [
+      'PASSPORT_NUMBER',
+      'VERIFY_IDENTITY',
+      'What is the passport number?',
+      'A1234567',
+    ],
+    [
+      'SALARY',
+      'PAYROLL_ADMINISTRATION',
+      'Tampilkan gaji untuk administrasi payroll',
+      'Rp12.000.000',
+    ],
+    [
+      'HEALTH_INFORMATION',
+      'BENEFITS_ADMINISTRATION',
+      'Tampilkan informasi kesehatan untuk benefit',
+      'Synthetic confidential health detail',
+    ],
+  ];
+  for (const [field_type, purpose, question, value] of records) {
+    const content = `Private fixture: ${value}`;
+    const source = await ingest({
+      type: 'DOCUMENT',
+      title: `${field_type} fixture`,
+      content,
+      personal_data_annotations: [
+        { field_type, start: content.indexOf(value), end: content.length },
+      ],
+      permissions: [{ subject_type: 'USER', subject_id: employeeId }],
+    });
+    const target = {
+      source_id: source.source_id,
+      chunk_id: source.chunks[0].chunk_id,
+    };
+    assert.ok(
+      !(
+        await request(
+          `/v1/sources/${target.source_id}/evidence?chunk_id=${target.chunk_id}`,
+          employee,
+        )
+      ).body.excerpt.includes(value),
+    );
+    const inquiry = await request('/v1/inquiries', employee, {
+      question,
+      personal_data_request: { ...target, field_type, purpose },
+    });
+    assert.equal(inquiry.status, 201, JSON.stringify(inquiry.body));
+    const key = inquiry.body.inquiry_id;
+    await request(
+      `/v1/sources/${target.source_id}/personal-data-grants`,
+      admin,
+      {
+        grants: [
+          { field_type, purpose, subject_type: 'USER', subject_id: employeeId },
+        ],
+      },
+      'PUT',
+    );
+    const result = await request(
+      `/v1/sources/${target.source_id}/personal-data`,
+      employee,
+      { inquiry_id: key, chunk_id: target.chunk_id },
+    );
+    assert.equal(result.body.value, value, JSON.stringify(result.body));
+    assert.equal(
+      (
+        await request(
+          `/v1/sources/${target.source_id}/personal-data`,
+          outsider,
+          { inquiry_id: key, chunk_id: target.chunk_id },
+        )
+      ).status,
+      404,
+    );
+    if (field_type === 'NAME') {
+      const token = (
+        await request('/v1/auth/tool-token', employee, { inquiry_id: key })
+      ).body.access_token;
+      await request(`/v1/inquiries/${key}/answer`, token, {
+        status: 'ANSWERED',
+        answer: value,
+        citations: [target],
+      });
+      assert.equal(
+        (await request(`/v1/inquiries/${key}`, employee)).body.answer,
+        value,
+      );
+      await request(
+        `/v1/sources/${target.source_id}/personal-data-grants`,
+        admin,
+        { grants: [] },
+        'PUT',
+      );
+      assert.ok(
+        !(await request(`/v1/inquiries/${key}`, employee)).body.answer.includes(
+          value,
+        ),
+      );
+    }
+  }
+});
+
+test('personal-data disclosure rejects ambiguous values and foreign grants', async () => {
+  const source = await ingest({
+    type: 'DOCUMENT',
+    title: 'Ambiguous contact fixture',
+    content: 'First +62 812-3456-7890. Second +62 813-2222-3333.',
+    permissions: [{ subject_type: 'USER', subject_id: employeeId }],
+  });
+  const target = {
+    source_id: source.source_id,
+    chunk_id: source.chunks[0].chunk_id,
+  };
+  const inquiry = await request('/v1/inquiries', employee, {
+    question: 'What is the phone number?',
+    personal_data_request: {
+      ...target,
+      field_type: 'PHONE',
+      purpose: 'CONTACT_PERSON',
+    },
+  });
+  const foreign = (await request('/v1/auth/me', outsider)).body.id;
+  assert.equal(
+    (
+      await request(
+        `/v1/sources/${target.source_id}/personal-data-grants`,
+        admin,
+        {
+          grants: [
+            {
+              field_type: 'PHONE',
+              purpose: 'CONTACT_PERSON',
+              subject_type: 'USER',
+              subject_id: foreign,
+            },
+          ],
+        },
+        'PUT',
+      )
+    ).status,
+    400,
+  );
+  await request(
+    `/v1/sources/${target.source_id}/personal-data-grants`,
+    admin,
+    {
+      grants: [
+        {
+          field_type: 'PHONE',
+          purpose: 'CONTACT_PERSON',
+          subject_type: 'USER',
+          subject_id: employeeId,
+        },
+      ],
+    },
+    'PUT',
+  );
+  assert.equal(
+    (
+      await request(`/v1/sources/${target.source_id}/personal-data`, employee, {
+        inquiry_id: inquiry.body.inquiry_id,
+        chunk_id: target.chunk_id,
+      })
+    ).status,
+    404,
+  );
+});
+
+test('annotated personal values stay masked in policies, cases and reviewer metadata', async () => {
+  const value = 'Example Confidential Name';
+  const me = (await request('/v1/auth/me', admin)).body;
+  const source = await ingest({
+    type: 'DOCUMENT',
+    title: 'Private metadata fixture',
+    state: 'APPROVED',
+    issuer_id: me.id,
+    content: value,
+    personal_data_annotations: [
+      { field_type: 'NAME', start: 0, end: value.length },
+    ],
+    permissions: [
+      { subject_type: 'ORGANIZATION', subject_id: orgId },
+      { subject_type: 'USER', subject_id: reviewerId, action: 'REVIEW' },
+    ],
+  });
+  const target = {
+    source_id: source.source_id,
+    chunk_id: source.chunks[0].chunk_id,
+  };
+  await request('/v1/policies', admin, {
+    evidence_chunk_id: target.chunk_id,
+    domain: 'private-metadata',
+    predicate: { person: value },
+    result: value,
+    authority: value,
+    valid_from: '2026-01-01T00:00:00Z',
+  });
+  const policy = await request('/v1/policies/resolve', employee, {
+    domain: 'private-metadata',
+    context: { person: value },
+  });
+  assert.equal(policy.body.status, 'SUPPORTED');
+  assert.ok(!JSON.stringify(policy.body).includes(value));
+  await request('/v1/cases', admin, {
+    domain: 'private-metadata',
+    context: { type: 'fixture' },
+    outcome: value,
+    authority: value,
+    evidence_chunk_ids: [target.chunk_id],
+  });
+  const cases = await request('/v1/cases/search', employee, {
+    domain: 'private-metadata',
+    context: { type: 'fixture' },
+  });
+  assert.ok(!JSON.stringify(cases.body).includes(value));
+  const inquiry = await request('/v1/inquiries', employee, {
+    question: 'Explain the fixture metadata',
+  });
+  const key = inquiry.body.inquiry_id;
+  await request(`/v1/inquiries/${key}/answer`, agent, {
+    status: 'ANSWERED',
+    answer: value,
+    citations: [target],
+  });
+  assert.ok(
+    !(await request(`/v1/inquiries/${key}`, employee)).body.answer.includes(
+      value,
+    ),
+  );
+  const feedback = await request('/v1/feedback', employee, {
+    inquiry_id: key,
+    domain: 'fuel',
+    action: 'COMMENT',
+    reason: value,
+    proposed_case: {
+      domain: 'fuel',
+      context: { person: value },
+      outcome: value,
+      authority: value,
+      evidence_chunk_ids: [target.chunk_id],
+    },
+  });
+  const detail = await request(
+    `/v1/feedback/${feedback.body.feedback_id}`,
+    reviewer,
+  );
+  assert.equal(detail.status, 200, JSON.stringify(detail.body));
+  assert.ok(!JSON.stringify(detail.body).includes(value));
+  const pending = await request('/v1/feedback?domain=fuel', reviewer);
+  assert.ok(!JSON.stringify(pending.body).includes(value));
+});
+
+test('personal-data annotations are masked across overlapping chunk boundaries', async () => {
+  const value = 'PRIVATE_ADDRESS_VALUE_WITH_SPACES';
+  const content = 'a'.repeat(1590) + value + 'b'.repeat(400);
+  const source = await ingest({
+    type: 'DOCUMENT',
+    title: 'Split private field',
+    content,
+    personal_data_annotations: [
+      { field_type: 'ADDRESS', start: 1590, end: 1590 + value.length },
+    ],
+    permissions: [{ subject_type: 'USER', subject_id: employeeId }],
+  });
+  for (const chunk of source.chunks) {
+    const result = await request(
+      `/v1/sources/${source.source_id}/evidence?chunk_id=${chunk.chunk_id}`,
+      employee,
+    );
+    assert.equal(result.status, 200);
+    assert.ok(!result.body.excerpt.includes(value));
+    if (chunk.span_start <= 1590 && chunk.span_end > 1590)
+      assert.match(result.body.excerpt, /REDACTED_ADDRESS/);
+  }
+  assert.equal(
+    (
+      await request('/v1/knowledge/ingest', admin, {
+        type: 'DOCUMENT',
+        title: 'Invalid annotations',
+        content: 'short',
+        personal_data_annotations: [{ field_type: 'NAME', start: 0, end: 100 }],
+      })
+    ).status,
+    400,
+  );
 });
 
 test('last admin protection and deactivation revoke user and agent sessions immediately', async () => {

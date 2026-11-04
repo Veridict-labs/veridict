@@ -5,6 +5,7 @@ import { PolicyModule } from '../policy/policy.module';
 import { FeedbackModule } from '../feedback/feedback.module';
 import { InquiriesModule } from '../inquiries/inquiries.module';
 import { EscalationsModule } from '../escalations/escalations.module';
+import { PersonalDataModule } from '../personal-data/personal-data.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { EscalationsModule } from '../escalations/escalations.module';
     FeedbackModule,
     InquiriesModule,
     EscalationsModule,
+    PersonalDataModule,
   ],
   controllers: [McpController],
 })

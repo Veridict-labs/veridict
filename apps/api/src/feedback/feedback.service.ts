@@ -13,7 +13,11 @@ import { AuditService } from '../audit/audit.service';
 import { InquiriesService } from '../inquiries/inquiries.service';
 import { PolicyService } from '../policy/policy.service';
 import { parse } from '../common/validation';
-import { evidence, maskPII } from '../knowledge/content';
+import {
+  evidence,
+  maskUsingChunks,
+  maskJsonUsingChunks,
+} from '../knowledge/content';
 
 @Injectable()
 export class FeedbackService {
@@ -103,13 +107,17 @@ export class FeedbackService {
           reason: true,
           action: true,
           createdAt: true,
+          inquiry: { select: { evidence: { select: { chunk: true } } } },
         },
       });
       return {
         results: rows.map((r) => ({
           feedback_id: r.id,
           inquiry_id: r.inquiryId,
-          reason: maskPII(r.reason),
+          reason: maskUsingChunks(
+            r.reason,
+            r.inquiry.evidence.map((e) => e.chunk),
+          ),
           action: r.action,
           created_at: r.createdAt,
         })),
@@ -142,18 +150,25 @@ export class FeedbackService {
         inquiry_id: inquiry.id,
         domain: feedback.domain,
         action: feedback.action,
-        reason: maskPII(feedback.reason),
+        reason: maskUsingChunks(
+          feedback.reason,
+          inquiry.evidence.map((e) => e.chunk),
+        ),
         status: feedback.status,
         proposed_case: proposed
           ? {
               ...proposed,
-              outcome: maskPII(proposed.outcome),
-              authority: maskPII(proposed.authority),
-              context: Object.fromEntries(
-                Object.entries(proposed.context).map(([key, value]) => [
-                  key,
-                  typeof value === 'string' ? maskPII(value) : value,
-                ]),
+              outcome: maskUsingChunks(
+                proposed.outcome,
+                inquiry.evidence.map((e) => e.chunk),
+              ),
+              authority: maskUsingChunks(
+                proposed.authority,
+                inquiry.evidence.map((e) => e.chunk),
+              ),
+              context: maskJsonUsingChunks(
+                proposed.context,
+                inquiry.evidence.map((e) => e.chunk),
               ),
             }
           : null,

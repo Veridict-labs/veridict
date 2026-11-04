@@ -18,7 +18,7 @@ export class InquiriesController {
   }
   @Post()
   create(@CurrentActor() actor: Actor, @Body() body: unknown) {
-    return this.inquiries.create(actor, parse(inquiryInput, body).question);
+    return this.inquiries.create(actor, parse(inquiryInput, body));
   }
   @Get()
   list(@CurrentActor() actor: Actor, @Query() query: unknown) {

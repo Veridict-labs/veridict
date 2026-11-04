@@ -131,6 +131,7 @@ model KnowledgeSource {
   embeddingModel String?
   chunks         SourceChunk[]
   permissions    Permission[]
+  personalDataGrants PersonalDataGrant[]
   @@unique([orgId, externalId, version])
   @@index([orgId, state])
 }
@@ -144,6 +145,7 @@ model SourceChunk {
   spanStart     Int
   spanEnd       Int
   integrityHash String
+  personalDataSpans Json @default("[]")
   embedding     Unsupported("vector")?
   embeddingDims Int?
   claims        PolicyClaim[]
@@ -215,6 +217,7 @@ model Inquiry {
   answer            String?
   structuredAnswer  Json?
   escalationDomain  String?
+  personalDataRequest Json?
   assumptions       String[] @default([])
   limitations       String[] @default([])
   permissionVersion Int
@@ -284,4 +287,15 @@ model DomainOwner {
   contactEmail String
   updatedAt    DateTime @updatedAt
   @@unique([orgId, domain])
+}
+
+model PersonalDataGrant {
+  id          String @id @default(uuid()) @db.Uuid
+  sourceId    String @db.Uuid
+  source      KnowledgeSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  fieldType   String
+  purpose     String
+  subjectType SubjectType
+  subjectId   String
+  @@unique([sourceId, fieldType, purpose, subjectType, subjectId], map: "personal_data_grant_scope_key")
 }

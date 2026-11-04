@@ -7,11 +7,12 @@ import {
 import type { Actor } from '../auth/actor';
 import { SecurityService } from '../auth/security.service';
 import { AuditService, digest } from '../audit/audit.service';
-import { evidence, maskPII } from '../knowledge/content';
-import type { AnswerInput } from '@veridict/contracts';
+import { evidence, maskPII, maskUsingChunks } from '../knowledge/content';
+import type { AnswerInput, InquiryInput } from '@veridict/contracts';
 import { answerInput } from '@veridict/contracts';
 import type { Prisma } from '../generated/prisma/client';
 import { EscalationsService } from '../escalations/escalations.service';
+import { PersonalDataService } from '../personal-data/personal-data.service';
 
 @Injectable()
 export class InquiriesService {
@@ -19,6 +20,7 @@ export class InquiriesService {
     private readonly security: SecurityService,
     private readonly audit: AuditService,
     private readonly escalations: EscalationsService,
+    private readonly personalData: PersonalDataService,
   ) {}
   async visible(
     tx: Prisma.TransactionClient,
@@ -74,9 +76,18 @@ export class InquiriesService {
     }
     return inquiry;
   }
-  create(actor: Actor, question: string) {
+  create(actor: Actor, input: InquiryInput) {
+    const { question } = input;
     return this.security.scope(actor, false, async (tx) => {
       if (actor.sessionKind !== 'USER') throw new ForbiddenException();
+      const target = input.personal_data_request
+        ? await this.personalData.validateRequest(
+            tx,
+            actor,
+            question,
+            input.personal_data_request,
+          )
+        : null;
       const organization = await tx.organization.findUniqueOrThrow({
         where: { id: actor.orgId },
       });
@@ -85,6 +96,8 @@ export class InquiriesService {
           orgId: actor.orgId,
           askerId: actor.id,
           question,
+          personalDataRequest: input.personal_data_request,
+          evidence: target ? { create: { chunkId: target.id } } : undefined,
           permissionVersion: organization.permissionVersion,
         },
       });
@@ -110,11 +123,42 @@ export class InquiriesService {
     return this.security.scope(actor, false, async (tx) => {
       const inquiry = await this.visible(tx, actor, inquiryId);
       const stale = inquiry.status === 'NEEDS_REVALIDATION';
+      const personal = !stale
+        ? await this.personalData.authorizedValue(tx, actor, inquiry)
+        : null;
+      const chunks = inquiry.evidence.map((e) => e.chunk);
+      const redact = (v: string) => maskUsingChunks(v, chunks);
+      const renderedAnswer = stale
+        ? null
+        : inquiry.answer
+          ? maskUsingChunks(
+              inquiry.answer,
+              chunks,
+              personal ? [personal.value] : [],
+            )
+          : null;
+      if (
+        personal &&
+        inquiry.answer &&
+        renderedAnswer !== redact(inquiry.answer)
+      )
+        await this.audit.record(
+          tx,
+          actor,
+          'PERSONAL_DATA_ANSWER_VIEWED',
+          [personal.source_id, personal.chunk_id],
+          'ALLOWED',
+          {
+            field_type: personal.field_type,
+            purpose: personal.purpose,
+            value_hash: digest(personal.value),
+          },
+        );
       const structured = inquiry.structuredAnswer
         ? answerInput.parse(inquiry.structuredAnswer)
         : null;
       const safeStatement = (value: AnswerInput['official_truth']) =>
-        value ? { ...value, statement: maskPII(value.statement) } : null;
+        value ? { ...value, statement: redact(value.statement) } : null;
       await this.audit.record(tx, actor, 'INQUIRY_OPENED', [inquiry.id]);
       return {
         inquiry_id: inquiry.id,
@@ -130,11 +174,11 @@ export class InquiriesService {
                 inquiry.escalationDomain,
               )
             : null,
-        answer: stale ? null : inquiry.answer ? maskPII(inquiry.answer) : null,
-        assumptions: stale ? [] : inquiry.assumptions.map(maskPII),
+        answer: renderedAnswer,
+        assumptions: stale ? [] : inquiry.assumptions.map(redact),
         limitations: stale
           ? ['Evidence has changed; the answer needs revalidation.']
-          : inquiry.limitations.map(maskPII),
+          : inquiry.limitations.map(redact),
         citations: stale ? [] : inquiry.evidence.map((e) => evidence(e.chunk)),
         official_truth: stale
           ? null
@@ -149,7 +193,7 @@ export class InquiriesService {
           ? []
           : (structured?.decision_trail.map((n) => ({
               ...n,
-              label: maskPII(n.label),
+              label: redact(n.label),
             })) ?? []),
         created_at: inquiry.createdAt,
         updated_at: inquiry.updatedAt,
@@ -204,6 +248,16 @@ export class InquiriesService {
         ...citations,
         ...(escalation?.evidence ? [escalation.evidence] : []),
       ];
+      if (inquiry.personalDataRequest) {
+        const request = inquiry.personalDataRequest as {
+          source_id: string;
+          chunk_id: string;
+        };
+        references.push({
+          source_id: request.source_id,
+          chunk_id: request.chunk_id,
+        });
+      }
       const chunks = await this.security.chunks(
         tx,
         actor,

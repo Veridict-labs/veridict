@@ -26,6 +26,7 @@ import {
   resolveInput,
   searchInput,
   escalationInput,
+  personalDataInput,
 } from '@veridict/contracts';
 import { AuthService } from '../auth/auth.service';
 import type { Actor, AuthRequest } from '../auth/actor';
@@ -37,6 +38,7 @@ import { parse } from '../common/validation';
 import { AuditService, digest } from '../audit/audit.service';
 import { SecurityService } from '../auth/security.service';
 import { EscalationsService } from '../escalations/escalations.service';
+import { PersonalDataService } from '../personal-data/personal-data.service';
 
 type ToolDefinition = {
   name: string;
@@ -71,11 +73,28 @@ export class McpController {
     private readonly audit: AuditService,
     private readonly security: SecurityService,
     private readonly escalations: EscalationsService,
+    private readonly personalData: PersonalDataService,
   ) {}
 
   private tools(): ToolDefinition[] {
     const complete = answerInput.extend({ inquiry_id: id });
     return [
+      {
+        name: 'get_personal_data',
+        description:
+          'Reveal one explicitly requested personal-data value only for a user-created, purpose-bound inquiry with current source READ and category/purpose grant. Search and evidence excerpts remain masked.',
+        schema: personalDataInput,
+        readOnly: true,
+        run: (a, i) => {
+          const v = parse(personalDataInput, i);
+          return this.personalData.disclose(
+            a,
+            v.inquiry_id,
+            v.source_id,
+            v.chunk_id,
+          );
+        },
+      },
       {
         name: 'resolve_domain_owner',
         description:
@@ -215,7 +234,13 @@ export class McpController {
       try {
         if (!tool) throw new Error('Unknown tool');
         const input = { ...args };
-        if (!['submit_feedback', 'complete_inquiry'].includes(tool.name))
+        if (
+          ![
+            'submit_feedback',
+            'complete_inquiry',
+            'get_personal_data',
+          ].includes(tool.name)
+        )
           delete input.inquiry_id;
         const result = await tool.run(actor, input);
         await this.audit.toolOutcome(
