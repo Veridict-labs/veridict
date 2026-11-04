@@ -116,6 +116,7 @@ before(async () => {
   app = await createApplication(false);
   await app.listen(0, '127.0.0.1');
   url = await app.getUrl();
+  process.env.MCP_PUBLIC_URL = `${url}/mcp`;
   db = app.get(DatabaseService);
   const org = await db.organization.create({
     data: { slug: 'test-org', name: 'Test organization' },
@@ -810,4 +811,79 @@ test('structured answer and decision trail evidence participate in revocation ch
     'PUT',
   );
   assert.equal((await request(`/v1/inquiries/${key}`, employee)).status, 404);
+});
+
+test('real MCP clients discover tools and remain isolated by the bearer token subject', async () => {
+  const {
+    Client: McpClient,
+  } = require('@modelcontextprotocol/sdk/client/index.js');
+  const {
+    StreamableHTTPClientTransport,
+  } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
+  const first = new McpClient({ name: 'employee-test', version: '1.0.0' });
+  const second = new McpClient({ name: 'outsider-test', version: '1.0.0' });
+  try {
+    await first.connect(
+      new StreamableHTTPClientTransport(new URL(`${url}/mcp`), {
+        requestInit: { headers: { Authorization: `Bearer ${agent}` } },
+      }),
+    );
+    await second.connect(
+      new StreamableHTTPClientTransport(new URL(`${url}/mcp`), {
+        requestInit: { headers: { Authorization: `Bearer ${outsider}` } },
+      }),
+    );
+    const listed = await first.listTools();
+    assert.equal(listed.tools.length, 7);
+    assert.ok(
+      listed.tools.some((t) => t.name === 'search_authorized_knowledge'),
+    );
+    const found = await first.callTool({
+      name: 'search_authorized_knowledge',
+      arguments: { query: 'fuel' },
+    });
+    assert.ok(JSON.parse(found.content[0].text).results.length > 0);
+    const denied = await second.callTool({
+      name: 'search_authorized_knowledge',
+      arguments: { query: 'fuel' },
+    });
+    assert.deepEqual(JSON.parse(denied.content[0].text).results, []);
+    const restricted = await first.callTool({
+      name: 'get_evidence',
+      arguments: {
+        source_id: secret.source_id,
+        chunk_id: secret.chunks[0].chunk_id,
+      },
+    });
+    const missing = await first.callTool({
+      name: 'get_evidence',
+      arguments: { source_id: randomUUID(), chunk_id: randomUUID() },
+    });
+    assert.equal(restricted.isError, true);
+    assert.deepEqual(restricted.content, missing.content);
+    const spoofed = await first.callTool({
+      name: 'search_authorized_knowledge',
+      arguments: {
+        query: 'Kenari',
+        user_id: (await request('/v1/auth/me', admin)).body.id,
+      },
+    });
+    assert.equal(spoofed.isError, true);
+  } finally {
+    await first.close();
+    await second.close();
+  }
+});
+test('MCP rejects untrusted origins and unauthenticated requests', async () => {
+  const result = await fetch(`${url}/mcp`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${employee}`,
+      Origin: 'https://untrusted.example',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ jsonrpc: '2.0', method: 'initialize', id: 1 }),
+  });
+  assert.equal(result.status, 403);
+  assert.equal((await request('/mcp', null, {})).status, 401);
 });

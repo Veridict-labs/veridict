@@ -7,6 +7,7 @@ import { KnowledgeModule } from './knowledge/knowledge.module';
 import { PolicyModule } from './policy/policy.module';
 import { InquiriesModule } from './inquiries/inquiries.module';
 import { FeedbackModule } from './feedback/feedback.module';
+import { McpModule } from './mcp/mcp.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { FeedbackModule } from './feedback/feedback.module';
     PolicyModule,
     InquiriesModule,
     FeedbackModule,
+    McpModule,
   ],
   controllers: [AppController],
   providers: [AppService],
