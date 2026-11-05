@@ -70,6 +70,7 @@ model Organization {
   sources           KnowledgeSource[]
   inquiries         Inquiry[]
   audits            AuditEvent[]
+  domainOwners      DomainOwner[]
 }
 
 model User {
@@ -91,6 +92,7 @@ model User {
   feedback      FeedbackEvent[] @relation("FeedbackActor")
   reviews       FeedbackEvent[] @relation("FeedbackReviewer")
   audits        AuditEvent[]
+  domainOwnerships DomainOwner[]
   @@unique([orgId, email])
 }
 
@@ -102,6 +104,8 @@ model Session {
   kind      SessionKind @default(USER)
   expiresAt DateTime
   createdAt DateTime @default(now())
+  inquiryId String? @db.Uuid
+  inquiry   Inquiry? @relation(fields: [inquiryId], references: [id], onDelete: Cascade)
   @@index([userId, expiresAt])
 }
 
@@ -127,6 +131,7 @@ model KnowledgeSource {
   embeddingModel String?
   chunks         SourceChunk[]
   permissions    Permission[]
+  personalDataGrants PersonalDataGrant[]
   @@unique([orgId, externalId, version])
   @@index([orgId, state])
 }
@@ -140,11 +145,13 @@ model SourceChunk {
   spanStart     Int
   spanEnd       Int
   integrityHash String
+  personalDataSpans Json @default("[]")
   embedding     Unsupported("vector")?
   embeddingDims Int?
   claims        PolicyClaim[]
   caseEvidence  CaseEvidence[]
   inquiryEvidence InquiryEvidence[]
+  domainOwners DomainOwner[]
   @@unique([sourceId, chunkIndex])
 }
 
@@ -209,6 +216,8 @@ model Inquiry {
   status            InquiryStatus @default(PENDING)
   answer            String?
   structuredAnswer  Json?
+  escalationDomain  String?
+  personalDataRequest Json?
   assumptions       String[] @default([])
   limitations       String[] @default([])
   permissionVersion Int
@@ -216,6 +225,8 @@ model Inquiry {
   updatedAt         DateTime @updatedAt
   evidence          InquiryEvidence[]
   feedback          FeedbackEvent[]
+  sessions          Session[]
+  audits            AuditEvent[]
   @@index([orgId, askerId, createdAt])
 }
 
@@ -256,6 +267,35 @@ model AuditEvent {
   resourceRefs String[] @default([])
   decision     String
   metadata     Json
+  inquiryId    String? @db.Uuid
+  inquiry      Inquiry? @relation(fields: [inquiryId], references: [id], onDelete: SetNull)
+  toolCallId   String? @db.Uuid
   createdAt    DateTime @default(now())
   @@index([orgId, createdAt])
+  @@index([orgId, inquiryId, createdAt])
+}
+
+model DomainOwner {
+  id           String @id @default(uuid()) @db.Uuid
+  orgId        String @db.Uuid
+  organization Organization @relation(fields: [orgId], references: [id])
+  domain       String
+  ownerId      String @db.Uuid
+  owner        User @relation(fields: [ownerId], references: [id])
+  chunkId      String @db.Uuid
+  chunk        SourceChunk @relation(fields: [chunkId], references: [id])
+  contactEmail String
+  updatedAt    DateTime @updatedAt
+  @@unique([orgId, domain])
+}
+
+model PersonalDataGrant {
+  id          String @id @default(uuid()) @db.Uuid
+  sourceId    String @db.Uuid
+  source      KnowledgeSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  fieldType   String
+  purpose     String
+  subjectType SubjectType
+  subjectId   String
+  @@unique([sourceId, fieldType, purpose, subjectType, subjectId], map: "personal_data_grant_scope_key")
 }

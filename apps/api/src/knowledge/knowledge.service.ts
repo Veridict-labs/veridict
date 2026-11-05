@@ -71,6 +71,27 @@ export class KnowledgeService {
           throw new BadRequestException('Invalid source version chain');
       }
       const chunks = splitContent(normalize(input));
+      const annotations = input.personal_data_annotations;
+      const sorted = [...annotations].sort((a, b) => a.start - b.start);
+      if (
+        sorted.some(
+          (a, i) =>
+            a.end > normalize(input).length ||
+            (i > 0 && a.start < sorted[i - 1].end),
+        )
+      )
+        throw new BadRequestException(
+          'Personal-data annotations must be in bounds and non-overlapping',
+        );
+      const chunkAnnotations = (chunk: (typeof chunks)[number]) =>
+        annotations
+          .filter((a) => a.start < chunk.spanEnd && a.end > chunk.spanStart)
+          .map((a) => ({
+            field_type: a.field_type,
+            start: Math.max(a.start, chunk.spanStart) - chunk.spanStart,
+            end: Math.min(a.end, chunk.spanEnd) - chunk.spanStart,
+            complete: a.start >= chunk.spanStart && a.end <= chunk.spanEnd,
+          }));
       if (
         input.embeddings &&
         (input.embeddings.length !== chunks.length ||
@@ -121,6 +142,7 @@ export class KnowledgeService {
           data: {
             ...chunk,
             sourceId: source.id,
+            personalDataSpans: chunkAnnotations(chunk),
             embeddingDims: vector?.length,
           },
         });
@@ -159,13 +181,32 @@ export class KnowledgeService {
     return this.security.scope(actor, false, async (tx) => {
       this.security.requireAdmin(actor);
       const chunks = splitContent(normalize(input));
+      if (
+        input.personal_data_annotations.some(
+          (a) => a.end > normalize(input).length,
+        )
+      )
+        throw new BadRequestException(
+          'Personal-data annotation is outside the content',
+        );
       await this.audit.record(tx, actor, 'INGESTION_PREVIEWED', [], 'ALLOWED', {
         chunk_count: chunks.length,
       });
       return {
         chunks: chunks.map((c) => ({
           chunk_index: c.chunkIndex,
-          content: maskPII(c.content),
+          content: maskPII(
+            c.content,
+            [],
+            input.personal_data_annotations
+              .filter((a) => a.start < c.spanEnd && a.end > c.spanStart)
+              .map((a) => ({
+                field_type: a.field_type,
+                start: Math.max(a.start, c.spanStart) - c.spanStart,
+                end: Math.min(a.end, c.spanEnd) - c.spanStart,
+                complete: a.start >= c.spanStart && a.end <= c.spanEnd,
+              })),
+          ),
           span_start: c.spanStart,
           span_end: c.spanEnd,
           integrity_hash: c.integrityHash,

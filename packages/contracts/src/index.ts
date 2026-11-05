@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { personalDataAnnotation, personalDataRequest } from './personal-data';
+export * from './personal-data';
 
 export const id = z.uuid();
 export const role = z.enum(['EMPLOYEE', 'REVIEWER', 'ADMIN']);
@@ -84,6 +86,10 @@ export const ingestInput = z
       .optional(),
     embedding_model: text.max(120).optional(),
     embeddings: z.array(embedding).max(1000).optional(),
+    personal_data_annotations: z
+      .array(personalDataAnnotation)
+      .max(500)
+      .default([]),
   })
   .superRefine((v, ctx) => {
     if (Boolean(v.content) === Boolean(v.records))
@@ -119,6 +125,13 @@ export const searchInput = z
     'Embedding and model must be supplied together',
   );
 export const evidenceInput = z.strictObject({ source_id: id, chunk_id: id });
+export const domainName = z.string().regex(/^[a-z][a-z0-9_-]{0,79}$/);
+export const domainOwnerInput = z.strictObject({
+  owner_id: id,
+  evidence_chunk_id: id,
+  contact_email: z.email().max(254),
+});
+export const escalationInput = z.strictObject({ domain: domainName });
 export const policyInput = z
   .strictObject({
     evidence_chunk_id: id,
@@ -161,7 +174,15 @@ export const caseInput = z.strictObject({
 export const reconcileInput = resolveInput.extend({
   max_results: z.number().int().min(1).max(30).default(10),
 });
-export const inquiryInput = z.strictObject({ question: text.max(4000) });
+export const personalDataInput = z.strictObject({
+  inquiry_id: id,
+  source_id: id,
+  chunk_id: id,
+});
+export const inquiryInput = z.strictObject({
+  question: text.max(4000),
+  personal_data_request: personalDataRequest.optional(),
+});
 export const citationSchema = z.strictObject({ source_id: id, chunk_id: id });
 export const supportedStatement = z.strictObject({
   statement: text.max(4000),
@@ -176,6 +197,7 @@ export const answerInput = z
       'UNAVAILABLE',
     ]),
     answer: text.max(20000),
+    escalation_domain: domainName.optional(),
     citations: z.array(citationSchema).max(100),
     assumptions: z.array(text.max(500)).max(30).default([]),
     limitations: z.array(text.max(500)).max(30).default([]),
@@ -221,6 +243,7 @@ export type ReconcileInput = z.infer<typeof reconcileInput>;
 export type AnswerInput = z.infer<typeof answerInput>;
 export type FeedbackInput = z.infer<typeof feedbackInput>;
 export type PermissionInput = z.infer<typeof permission>;
+export type InquiryInput = z.infer<typeof inquiryInput>;
 export type Evidence = {
   source_id: string;
   chunk_id: string;

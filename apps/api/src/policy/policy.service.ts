@@ -15,7 +15,11 @@ import type { Actor } from '../auth/actor';
 import { SecurityService } from '../auth/security.service';
 import { AuditService } from '../audit/audit.service';
 import type { Prisma } from '../generated/prisma/client';
-import { evidence, maskPII } from '../knowledge/content';
+import {
+  evidence,
+  maskUsingChunks,
+  maskJsonUsingChunks,
+} from '../knowledge/content';
 
 type Context = Record<string, string | number | boolean>;
 export function matches(predicate: Context, context: Context) {
@@ -202,36 +206,35 @@ export class PolicyService {
         sourceId = predecessor?.supersedesId ?? null;
       }
     }
-    const applicable = eligible
-      .filter((c) => {
-        if (
-          supersededClaims.has(c.id) ||
-          supersededSources.has(c.evidence.sourceId)
-        ) {
-          rejected.push({ claim_id: c.id, reason: 'EXPLICITLY_SUPERSEDED' });
-          return false;
-        }
-        const replacement = c.evidence.source.supersededBy;
-        if (
-          replacement?.state === 'APPROVED' &&
-          replacement.validFrom &&
-          replacement.validFrom <= asOf
-        ) {
-          // Do not return obsolete policy when its replacement is inaccessible.
-          rejected.push({ claim_id: c.id, reason: 'OUTSIDE_VALIDITY_WINDOW' });
-          return false;
-        }
-        return true;
-      })
-      .map((c) => ({
-        claim_id: c.id,
-        result: maskPII(c.result),
-        authority: maskPII(c.authority),
-        predicate: c.predicate,
-        evidence: evidence(c.evidence),
-      }));
+    const applicableClaims = eligible.filter((c) => {
+      if (
+        supersededClaims.has(c.id) ||
+        supersededSources.has(c.evidence.sourceId)
+      ) {
+        rejected.push({ claim_id: c.id, reason: 'EXPLICITLY_SUPERSEDED' });
+        return false;
+      }
+      const replacement = c.evidence.source.supersededBy;
+      if (
+        replacement?.state === 'APPROVED' &&
+        replacement.validFrom &&
+        replacement.validFrom <= asOf
+      ) {
+        // Do not return obsolete policy when its replacement is inaccessible.
+        rejected.push({ claim_id: c.id, reason: 'OUTSIDE_VALIDITY_WINDOW' });
+        return false;
+      }
+      return true;
+    });
+    const applicable = applicableClaims.map((c) => ({
+      claim_id: c.id,
+      result: maskUsingChunks(c.result, [c.evidence]),
+      authority: maskUsingChunks(c.authority, [c.evidence]),
+      predicate: maskJsonUsingChunks(c.predicate, [c.evidence]),
+      evidence: evidence(c.evidence),
+    }));
     const distinct = new Set(
-      applicable.map((c) => JSON.stringify([c.result, c.authority])),
+      applicableClaims.map((c) => JSON.stringify([c.result, c.authority])),
     );
     const status =
       applicable.length === 0
@@ -342,8 +345,14 @@ export class PolicyService {
         );
         return {
           case_id: c.id,
-          outcome: maskPII(c.outcome),
-          authority: maskPII(c.authority),
+          outcome: maskUsingChunks(
+            c.outcome,
+            c.evidence.map((e) => e.chunk),
+          ),
+          authority: maskUsingChunks(
+            c.authority,
+            c.evidence.map((e) => e.chunk),
+          ),
           matching_factors: factors,
           disqualifying_differences: differences,
           comparable: differences.length === 0 && factors.length > 0,
@@ -387,11 +396,17 @@ export class PolicyService {
           return counts;
         }, {}),
       ).map(([authority, count]) => ({ authority, count }));
+      const formal = await tx.policyClaim.findMany({
+        where: { id: { in: official.applicable.map((p) => p.claim_id) } },
+        select: { authority: true },
+      });
+      const observed = await tx.decisionCase.findMany({
+        where: { id: { in: comparable.map((c) => c.case_id) } },
+        select: { authority: true },
+      });
       const gap =
         official.status === 'SUPPORTED' &&
-        comparable.some(
-          (c) => !official.applicable.some((p) => p.authority === c.authority),
-        );
+        observed.some((c) => !formal.some((p) => p.authority === c.authority));
       await this.audit.record(
         tx,
         actor,

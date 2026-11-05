@@ -24,35 +24,40 @@ $me = Invoke-RestMethod -Uri "$api/v1/auth/me" -Headers $headers
 
 ## REST endpoints
 
-| Method     | Path                                    | Access and purpose                                                |
-| ---------- | --------------------------------------- | ----------------------------------------------------------------- |
-| GET        | `/health`                               | Public liveness; returns `ok`                                     |
-| POST       | `/v1/auth/login`                        | Public, rate-limited login                                        |
-| GET        | `/v1/auth/me`                           | Current verified actor                                            |
-| POST       | `/v1/auth/logout`                       | Revoke the supplied session                                       |
-| POST       | `/v1/auth/tool-token`                   | User session; issue an agent token                                |
-| GET / POST | `/v1/users`                             | Admin user listing / creation                                     |
-| PATCH      | `/v1/users/:id`                         | Admin changes role, department, active flag, review domains       |
-| POST       | `/v1/knowledge/preview`                 | Admin; preview masked chunks without persistence                  |
-| POST       | `/v1/knowledge/ingest`                  | Admin; ingest a document, chat, or task export                    |
-| POST       | `/v1/knowledge/search`                  | Authorized lexical or hybrid retrieval                            |
-| PUT        | `/v1/sources/:id/permissions`           | Admin; replace the entire source ACL                              |
-| GET        | `/v1/sources/:id/evidence?chunk_id=...` | Reauthorize and open one chunk                                    |
-| POST       | `/v1/policies`                          | Human domain reviewer with source READ + REVIEW; validate a claim |
-| POST       | `/v1/policies/resolve`                  | Resolve visible claims by context and effective time              |
-| POST       | `/v1/cases`                             | Human reviewer; record a validated historical case                |
-| POST       | `/v1/cases/search`                      | Search visible validated cases                                    |
-| POST       | `/v1/truth/reconcile`                   | Retrieve and compare official rules and observed practice         |
-| POST / GET | `/v1/inquiries`                         | Create a pending inquiry / list own accessible inquiries          |
-| GET        | `/v1/inquiries/:id`                     | Own inquiry with current evidence access checked                  |
-| POST       | `/v1/inquiries/:id/answer`              | Delegated agent for the inquiry owner; persist an answer          |
-| POST       | `/v1/feedback`                          | Inquiry owner or their agent; submit pending feedback             |
-| GET        | `/v1/feedback?domain=...`               | Domain reviewer; list reviewable pending feedback                 |
-| GET        | `/v1/feedback/:id`                      | Domain reviewer; inspect proposal and evidence                    |
-| POST       | `/v1/feedback/:id/validate`             | Independent human reviewer; validate or reject                    |
-| GET        | `/v1/audit`                             | Admin; organization-scoped audit records                          |
-| POST       | `/v1/audit/prune`                       | Admin; remove logs older than `retention_days` (default 30)       |
-| POST       | `/mcp`                                  | Authenticated Streamable HTTP MCP                                 |
+| Method       | Path                                    | Access and purpose                                                |
+| ------------ | --------------------------------------- | ----------------------------------------------------------------- |
+| GET          | `/health`                               | Public liveness; returns `ok`                                     |
+| POST         | `/v1/auth/login`                        | Public, rate-limited login                                        |
+| GET          | `/v1/auth/me`                           | Current verified actor                                            |
+| POST         | `/v1/auth/logout`                       | Revoke the supplied session                                       |
+| POST         | `/v1/auth/tool-token`                   | User session; issue an agent token                                |
+| GET / POST   | `/v1/users`                             | Admin user listing / creation                                     |
+| PATCH        | `/v1/users/:id`                         | Admin changes role, department, active flag, review domains       |
+| POST         | `/v1/knowledge/preview`                 | Admin; preview masked chunks without persistence                  |
+| POST         | `/v1/knowledge/ingest`                  | Admin; ingest a document, chat, or task export                    |
+| POST         | `/v1/knowledge/search`                  | Authorized lexical or hybrid retrieval                            |
+| PUT          | `/v1/sources/:id/permissions`           | Admin; replace the entire source ACL                              |
+| GET          | `/v1/sources/:id/evidence?chunk_id=...` | Reauthorize and open one chunk                                    |
+| POST         | `/v1/policies`                          | Human domain reviewer with source READ + REVIEW; validate a claim |
+| POST         | `/v1/policies/resolve`                  | Resolve visible claims by context and effective time              |
+| POST         | `/v1/cases`                             | Human reviewer; record a validated historical case                |
+| POST         | `/v1/cases/search`                      | Search visible validated cases                                    |
+| POST         | `/v1/truth/reconcile`                   | Retrieve and compare official rules and observed practice         |
+| POST / GET   | `/v1/inquiries`                         | Create a pending inquiry / list own accessible inquiries          |
+| GET          | `/v1/inquiries/:id`                     | Own inquiry with current evidence access checked                  |
+| POST         | `/v1/inquiries/:id/answer`              | Delegated agent for the inquiry owner; persist an answer          |
+| POST         | `/v1/feedback`                          | Inquiry owner or their agent; submit pending feedback             |
+| GET          | `/v1/feedback?domain=...`               | Domain reviewer; list reviewable pending feedback                 |
+| GET          | `/v1/feedback/:id`                      | Domain reviewer; inspect proposal and evidence                    |
+| POST         | `/v1/feedback/:id/validate`             | Independent human reviewer; validate or reject                    |
+| GET          | `/v1/audit`                             | Admin; organization-scoped audit records                          |
+| POST         | `/v1/audit/prune`                       | Admin; remove logs older than `retention_days` (default 30)       |
+| POST         | `/mcp`                                  | Authenticated Streamable HTTP MCP                                 |
+| PUT / DELETE | `/v1/domains/:domain/owner`             | Admin; curate or remove a source-backed domain owner              |
+| POST         | `/v1/escalations/resolve`               | Find a currently visible domain owner                             |
+| GET          | `/v1/inquiries/:id/trace`               | Own inquiry trace with currently authorized source references     |
+| PUT          | `/v1/sources/:id/personal-data-grants`  | Admin; replace category/purpose disclosure grants                 |
+| POST         | `/v1/sources/:id/personal-data`         | Purpose-bound disclosure for an owned inquiry                     |
 
 User, inquiry, and audit lists accept `limit` (1–100, default 30) and an optional UUID `cursor`. Inquiry/audit responses expose `next_cursor`; user listing returns an array. Resource denial and absence share HTTP 404 with `{ "error": "UNAVAILABLE", "message": "Resource unavailable" }`. Invalid input is HTTP 400, role violations 403, and conflicts 409. REST POST operations return 201; MCP uses its transport-specific statuses.
 
@@ -77,7 +82,7 @@ Sources default to private READ + REVIEW grants for the ingesting administrator.
 
 Human reviewers require matching `review_domains` plus source READ and REVIEW. ADMIN has domain authority but still needs source grants. Approved sources require an active administrator/reviewer issuer. Canonical policy claims require a domain-authorized issuer, a human validator, and a `result` quoted from the source chunk. Approval metadata represents human curation, not LLM inference. Replacement sources require sequential `version`, `supersedes_id`, and an effective start; cross-source claim supersession must follow that version chain.
 
-Chunks contain at most 1,600 UTF-16 code units with 200 overlap, original normalized-text offsets, and a SHA-256 hash. Returned excerpts mask NIK and Indonesian phone patterns. `redacted` indicates masking; displayed length can differ from the original span. This is a targeted pattern masker, not a general PII classifier.
+Chunks contain at most 1,600 UTF-16 code units with 200 overlap, original normalized-text offsets, and a SHA-256 hash. Returned excerpts redact recognized personal-data patterns and explicitly annotated contextual data. `redacted` indicates masking; displayed length can differ from the original span. The classification coverage and annotation requirements are described below.
 
 For real embeddings, call `/v1/knowledge/preview` with the ingestion body, embed the returned masked chunks, then submit one nonzero numeric vector per chunk together with `embedding_model`. Vectors for a source must have equal dimensions (at most 4,096). The backend does not fabricate embeddings or select an external provider.
 
@@ -107,9 +112,35 @@ Feedback contains `inquiry_id`, `domain`, `action`, `reason`, and optional `prop
 
 Connect Streamable HTTP to `http://localhost:3001/mcp` using a per-user bearer token. `MCP_PUBLIC_URL` configures the expected public host/origin; `WEB_ORIGIN` allows the frontend origin. Set both for the actual deployment behind a reverse proxy. The maintained MCP SDK v1 negotiates its supported protocol; actual WorkBuddy compatibility still requires a live spike.
 
-Tools: `search_authorized_knowledge`, `resolve_policy_claims`, `find_validated_precedents`, `reconcile_truth`, `get_evidence`, `submit_feedback`, and `complete_inquiry`.
+Tools: `search_authorized_knowledge`, `resolve_policy_claims`, `find_validated_precedents`, `reconcile_truth`, `get_evidence`, `resolve_domain_owner`, `get_personal_data`, `submit_feedback`, and `complete_inquiry`.
 
 The server is stateless between HTTP requests and verifies identity per invocation. Arguments cannot select a different actor. Missing and denied evidence share a generic tool error. Legacy SSE and GET/DELETE session transports are not implemented.
+
+## Domain-owner routing
+
+`POST /v1/escalations/resolve` and MCP `resolve_domain_owner` accept `{ "domain": "fuel" }`. Admins curate mappings using `PUT /v1/domains/:domain/owner` with `owner_id`, `evidence_chunk_id`, and `contact_email`, or DELETE the same path. Curating a mapping requires source READ and REVIEW. The owner must be active in the same organization.
+
+Contacts are visible only while their directory evidence is readable. Restricted and missing entries return the same `{ status: "UNAVAILABLE", owner: null, evidence: null }`. Setting `escalation_domain` on an INSUFFICIENT_EVIDENCE answer adds a freshly authorized `escalation` to the inquiry response and includes its directory evidence in stored-answer revocation. Mapping updates/removal mark affected answers for revalidation. A business-email directory entry does not grant policy authority or permission to reveal personal phone numbers.
+
+## Inquiry audit correlation
+
+Issue an agent token with `POST /v1/auth/tool-token` and `{ "inquiry_id": "..." }` to bind it to one currently accessible inquiry owned by the user. The token cannot switch inquiries. Existing unbound tokens remain supported for standalone searches. REST callers can attach `X-Inquiry-ID`; MCP tools accept an optional `inquiry_id` when the token is unbound. Both paths verify ownership and current evidence access before performing the operation.
+
+MCP invocations receive server-generated `tool_call_id` values. Accepted invocations log STARTED and COMPLETED/DENIED events; service events share their inquiry/tool-call context. Result text is hashed in audit rather than copied. `GET /v1/inquiries/:id/trace` exposes the owner's paginated trace with source/chunk references filtered by current READ access. Administrators can filter their organization audit using `/v1/audit?inquiry_id=...`. Requests with invalid context are rejected before business operations. A complete agent trace requires a bound token or an explicit inquiry context; the server never guesses from a user's most recent question.
+
+## Personal-data classification and disclosure
+
+Supported categories are NIK, PHONE, EMAIL, ADDRESS, DATE_OF_BIRTH, BANK_ACCOUNT, NAME, NPWP, PASSPORT_NUMBER, SALARY, and HEALTH_INFORMATION. Their purpose registry is exported from `@veridict/contracts` in `personal-data.ts`; grants store category/purpose strings so adding a category does not require a database enum migration.
+
+Patterns detect NIK, Indonesian phone numbers, email, formatted NPWP, and labelled bank accounts, dates of birth, and passports. Context-dependent data (names, addresses, salaries, health descriptions) must be tagged by the source curator using `personal_data_annotations: [{ field_type, start, end }]` at ingestion. Offsets refer to normalized content in UTF-16 code units. Out-of-bounds/overlapping annotations are rejected. Chunk boundaries preserve masking; incomplete or ambiguously merged fields cannot be disclosed. This is not a universal PII detector; untagged contextual data is outside automatic detection coverage.
+
+Source READ never grants personal-data disclosure. Admins replace separate grants through `PUT /v1/sources/:id/personal-data-grants` with `{ grants: [{ field_type, purpose, subject_type, subject_id }] }`. Grants may target a user, department, or organization in the source's organization. Empty grants revoke disclosure while preserving ordinary READ. The ordinary evidence/search endpoints stay masked even for a disclosure-authorized user.
+
+A human USER session must create the inquiry with an immutable `personal_data_request` containing `field_type`, `purpose`, `source_id`, and `chunk_id`. The original question must explicitly request that category; a conservative Indonesian/English keyword check rejects negations or unrelated questions. The typed declaration establishes user intent; it is not an LLM necessity classifier. Category/purpose pairs are fixed by the registry (for example PHONE/EMAIL → CONTACT_PERSON, NIK → VERIFY_IDENTITY, BANK_ACCOUNT → PROCESS_REIMBURSEMENT). An agent cannot create the inquiry or amend that declaration.
+
+`POST /v1/sources/:id/personal-data` takes `{ inquiry_id, chunk_id }`; MCP `get_personal_data` takes `{ inquiry_id, source_id, chunk_id }`. Both require ownership, current source READ, a matching category/purpose grant, and exactly one complete distinct value of that category in the target chunk. They reveal that value only, never a whole unmasked excerpt. A source that has been replaced is ineligible. Missing/denied/ambiguous values share the unavailable result.
+
+When reading the answer, only that exact authorized value may remain visible; other detected/tagged values remain masked. Grant revocation masks it on the next answer read, and base READ revocation hides the inquiry. Audit records contain category, purpose, source references, and hashes, not plaintext personal values. Policy, precedent, and reviewer metadata also redact known tagged values. Curated business directory contacts are intentionally published through their directory evidence ACL; private-profile access uses the separate disclosure path.
 
 ## Operations and verification
 

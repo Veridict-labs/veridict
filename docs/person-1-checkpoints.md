@@ -1,5 +1,7 @@
 # Person 1: checkpoint implementasi AI dan WorkBuddy
 
+**Pembaruan kontrak backend:** server kini menyediakan sembilan tool, termasuk `resolve_domain_owner` dan `get_personal_data`. Smoke client tetap memeriksa tujuh tool inti. Gunakan token terikat inquiry untuk korelasi audit; ikuti [kontrak terbaru](backend.md) dan [fixture demo bersama](demo-fixtures.md). Instruksi WorkBuddy telah diselaraskan dengan routing dan disclosure berizin. Tes client lulus, tetapi tidak membuktikan koneksi WorkBuddy nyata.
+
 Baseline: backend `f15bbed`, 4 November 2026. Pembagian peran mengikuti [rencana tim](team-task-division.md); [checklist Person 2](person-2-checklist.md) memisahkan implementasi backend dan penerimaan integrasinya.
 
 ## WorkBuddy dalam proyek ini

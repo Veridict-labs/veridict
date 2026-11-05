@@ -29,12 +29,14 @@ async function request(
   token,
   body,
   method = body === undefined ? 'GET' : 'POST',
+  extraHeaders = {},
 ) {
   const response = await fetch(`${url}${route}`, {
     method,
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      ...extraHeaders,
     },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
@@ -838,7 +840,7 @@ test('real MCP clients discover tools and remain isolated by the bearer token su
       }),
     );
     const listed = await first.listTools();
-    assert.equal(listed.tools.length, 7);
+    assert.equal(listed.tools.length, 9);
     assert.ok(
       listed.tools.some((t) => t.name === 'search_authorized_knowledge'),
     );
@@ -1012,6 +1014,767 @@ test('preview provides stable masked chunks for embedding without persisting a s
   });
   assert.equal(stored.chunks.length, preview.body.chunks.length);
 });
+test('domain-owner escalation respects source ACL and is attached to insufficient answers', async () => {
+  const source = await ingest({
+    type: 'DOCUMENT',
+    title: 'HR contact directory',
+    content: 'Fuel questions: contact the HR reviewer.',
+    permissions: [{ subject_type: 'USER', subject_id: employeeId }],
+  });
+  const body = {
+    owner_id: reviewerId,
+    evidence_chunk_id: source.chunks[0].chunk_id,
+    contact_email: 'fuel-owner@example.test',
+  };
+  assert.equal(
+    (await request('/v1/domains/fuel/owner', employee, body, 'PUT')).status,
+    403,
+  );
+  assert.equal(
+    (await request('/v1/domains/fuel/owner', admin, body, 'PUT')).status,
+    200,
+  );
+  const found = await request('/v1/escalations/resolve', employee, {
+    domain: 'fuel',
+  });
+  assert.equal(found.body.owner.contact_email, body.contact_email);
+  const denied = await request('/v1/escalations/resolve', outsider, {
+    domain: 'fuel',
+  });
+  const absent = await request('/v1/escalations/resolve', outsider, {
+    domain: 'missing',
+  });
+  assert.deepEqual(denied.body, absent.body);
+  const inquiry = await request('/v1/inquiries', employee, {
+    question: 'What is the new allowance for a missing category?',
+  });
+  const key = inquiry.body.inquiry_id;
+  assert.equal(
+    (
+      await request(`/v1/inquiries/${key}/answer`, agent, {
+        status: 'INSUFFICIENT_EVIDENCE',
+        answer: 'I do not have enough evidence. Contact the authorized owner.',
+        citations: [],
+        escalation_domain: 'fuel',
+      })
+    ).status,
+    201,
+  );
+  assert.equal(
+    (await request(`/v1/inquiries/${key}`, employee)).body.escalation.status,
+    'AVAILABLE',
+  );
+  await request(
+    `/v1/sources/${source.source_id}/permissions`,
+    admin,
+    { permissions: [] },
+    'PUT',
+  );
+  assert.equal(
+    (await request('/v1/escalations/resolve', employee, { domain: 'fuel' }))
+      .body.status,
+    'UNAVAILABLE',
+  );
+  assert.equal((await request(`/v1/inquiries/${key}`, employee)).status, 404);
+});
+
+test('inquiry-bound MCP sessions correlate tool activity and reject a different inquiry', async () => {
+  const source = await ingest({
+    type: 'DOCUMENT',
+    title: 'Trace fixture',
+    content: 'Tracealpha decision evidence.',
+    permissions: [{ subject_type: 'USER', subject_id: employeeId }],
+  });
+  const inquiry = await request('/v1/inquiries', employee, {
+    question: 'Explain Tracealpha',
+  });
+  const other = await request('/v1/inquiries', employee, {
+    question: 'Another question',
+  });
+  const key = inquiry.body.inquiry_id;
+  const token = (
+    await request('/v1/auth/tool-token', employee, { inquiry_id: key })
+  ).body.access_token;
+  const {
+    Client: McpClient,
+  } = require('@modelcontextprotocol/sdk/client/index.js');
+  const {
+    StreamableHTTPClientTransport,
+  } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
+  const client = new McpClient({
+    name: 'inquiry-trace-test',
+    version: '1.0.0',
+  });
+  try {
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(`${url}/mcp`), {
+        requestInit: { headers: { Authorization: `Bearer ${token}` } },
+      }),
+    );
+    assert.ok(
+      !(
+        await client.callTool({
+          name: 'search_authorized_knowledge',
+          arguments: { query: 'Tracealpha' },
+        })
+      ).isError,
+    );
+    const denied = await client.callTool({
+      name: 'get_evidence',
+      arguments: {
+        source_id: secret.source_id,
+        chunk_id: secret.chunks[0].chunk_id,
+      },
+    });
+    assert.equal(denied.isError, true);
+    const wrong = await client.callTool({
+      name: 'search_authorized_knowledge',
+      arguments: { query: 'Tracealpha', inquiry_id: other.body.inquiry_id },
+    });
+    assert.equal(wrong.isError, true);
+    const answer = await client.callTool({
+      name: 'complete_inquiry',
+      arguments: {
+        inquiry_id: key,
+        status: 'ANSWERED',
+        answer: 'The cited decision is Tracealpha.',
+        citations: [
+          { source_id: source.source_id, chunk_id: source.chunks[0].chunk_id },
+        ],
+      },
+    });
+    assert.ok(!answer.isError, JSON.stringify(answer));
+  } finally {
+    await client.close();
+  }
+  const trace = await request(`/v1/inquiries/${key}/trace?limit=100`, employee);
+  assert.equal(trace.status, 200, JSON.stringify(trace.body));
+  const events = trace.body.results;
+  assert.ok(events.some((e) => e.event_type === 'INQUIRY_CREATED'));
+  assert.ok(events.some((e) => e.event_type === 'INQUIRY_ANSWERED'));
+  assert.ok(
+    events.some(
+      (e) =>
+        e.event_type === 'KNOWLEDGE_SEARCH' &&
+        e.resource_refs.includes(source.source_id),
+    ),
+  );
+  assert.ok(events.some((e) => e.event_type === 'MCP_TOOL_DENIED'));
+  for (const start of events.filter((e) => e.event_type === 'MCP_TOOL_STARTED'))
+    assert.ok(
+      events.some(
+        (e) =>
+          e.tool_call_id === start.tool_call_id &&
+          ['MCP_TOOL_COMPLETED', 'MCP_TOOL_DENIED'].includes(e.event_type),
+      ),
+    );
+  assert.doesNotMatch(JSON.stringify(events), new RegExp(secret.source_id));
+  assert.equal(
+    (await request(`/v1/inquiries/${key}/trace`, outsider)).status,
+    404,
+  );
+  assert.equal(
+    (await request('/v1/auth/tool-token', reviewer, { inquiry_id: key }))
+      .status,
+    404,
+  );
+  const audit = await request(`/v1/audit?inquiry_id=${key}&limit=100`, admin);
+  assert.ok(audit.body.results.every((e) => e.inquiryId === key));
+});
+
+test('REST inquiry context is owner-checked and trace references are reauthorized', async () => {
+  const inquiry = await request('/v1/inquiries', employee, {
+    question: 'Pending trace question',
+  });
+  const key = inquiry.body.inquiry_id;
+  const source = await ingest({
+    type: 'DOCUMENT',
+    title: 'Trace revocation fixture',
+    content: 'Tracebeta record.',
+    permissions: [{ subject_type: 'USER', subject_id: employeeId }],
+  });
+  assert.equal(
+    (
+      await request(
+        '/v1/knowledge/search',
+        employee,
+        { query: 'Tracebeta' },
+        'POST',
+        { 'X-Inquiry-ID': key },
+      )
+    ).status,
+    201,
+  );
+  assert.equal(
+    (
+      await request(
+        '/v1/knowledge/search',
+        outsider,
+        { query: 'Tracebeta' },
+        'POST',
+        { 'X-Inquiry-ID': key },
+      )
+    ).status,
+    404,
+  );
+  const before = await request(`/v1/inquiries/${key}/trace`, employee);
+  assert.match(JSON.stringify(before.body), new RegExp(source.source_id));
+  await request(
+    `/v1/sources/${source.source_id}/permissions`,
+    admin,
+    { permissions: [] },
+    'PUT',
+  );
+  const after = await request(`/v1/inquiries/${key}/trace`, employee);
+  assert.equal(after.status, 200);
+  assert.doesNotMatch(JSON.stringify(after.body), new RegExp(source.source_id));
+});
+
+test('personal-data disclosure requires original intent, READ and a category/purpose grant', async () => {
+  const phone = '+62 812-3456-7890';
+  const nik = '1234567890123456';
+  const source = await ingest({
+    type: 'DOCUMENT',
+    title: 'Private contact fixture',
+    content: `Contact phone: ${phone}. NIK ${nik}. Email: private.person@example.test`,
+    permissions: [{ subject_type: 'USER', subject_id: employeeId }],
+  });
+  const target = {
+    source_id: source.source_id,
+    chunk_id: source.chunks[0].chunk_id,
+  };
+  const personal = {
+    ...target,
+    field_type: 'PHONE',
+    purpose: 'CONTACT_PERSON',
+  };
+  assert.equal(
+    (
+      await request('/v1/inquiries', employee, {
+        question: 'Explain reimbursement policy',
+        personal_data_request: personal,
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await request('/v1/inquiries', employee, {
+        question: 'Jangan tampilkan nomor telepon',
+        personal_data_request: personal,
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await request('/v1/inquiries', employee, {
+        question: 'Berapa nomor telepon PIC?',
+        personal_data_request: { ...personal, purpose: 'VERIFY_IDENTITY' },
+      })
+    ).status,
+    400,
+  );
+  const inquiry = await request('/v1/inquiries', employee, {
+    question: 'Berapa nomor telepon PIC untuk saya hubungi?',
+    personal_data_request: personal,
+  });
+  const key = inquiry.body.inquiry_id;
+  assert.equal(inquiry.status, 201, JSON.stringify(inquiry.body));
+  const path = `/v1/sources/${source.source_id}/personal-data`;
+  const body = { inquiry_id: key, chunk_id: target.chunk_id };
+  assert.equal((await request(path, employee, body)).status, 404);
+  const grants = [
+    {
+      field_type: 'PHONE',
+      purpose: 'CONTACT_PERSON',
+      subject_type: 'USER',
+      subject_id: employeeId,
+    },
+  ];
+  assert.equal(
+    (
+      await request(
+        `/v1/sources/${source.source_id}/personal-data-grants`,
+        employee,
+        { grants },
+        'PUT',
+      )
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await request(
+        `/v1/sources/${source.source_id}/personal-data-grants`,
+        admin,
+        { grants },
+        'PUT',
+      )
+    ).status,
+    200,
+  );
+  const value = await request(path, employee, body);
+  assert.equal(value.body.value, phone);
+  assert.doesNotMatch(JSON.stringify(value.body), new RegExp(nik));
+  const normal = await request(
+    `/v1/sources/${source.source_id}/evidence?chunk_id=${target.chunk_id}`,
+    employee,
+  );
+  assert.doesNotMatch(
+    JSON.stringify(normal.body),
+    /812-3456|1234567890123456|private.person@example.test/,
+  );
+  const token = (
+    await request('/v1/auth/tool-token', employee, { inquiry_id: key })
+  ).body.access_token;
+  const {
+    Client: McpClient,
+  } = require('@modelcontextprotocol/sdk/client/index.js');
+  const {
+    StreamableHTTPClientTransport,
+  } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
+  const client = new McpClient({
+    name: 'personal-data-test',
+    version: '1.0.0',
+  });
+  try {
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(`${url}/mcp`), {
+        requestInit: { headers: { Authorization: `Bearer ${token}` } },
+      }),
+    );
+    const result = await client.callTool({
+      name: 'get_personal_data',
+      arguments: { inquiry_id: key, ...target },
+    });
+    assert.equal(JSON.parse(result.content[0].text).value, phone);
+  } finally {
+    await client.close();
+  }
+  const answer = await request(`/v1/inquiries/${key}/answer`, token, {
+    status: 'ANSWERED',
+    answer: `Phone: ${phone}. NIK: ${nik}.`,
+    citations: [target],
+  });
+  assert.equal(answer.status, 201, JSON.stringify(answer.body));
+  const displayed = await request(`/v1/inquiries/${key}`, employee);
+  assert.match(displayed.body.answer, /812-3456-7890/);
+  assert.doesNotMatch(displayed.body.answer, new RegExp(nik));
+  await request(
+    `/v1/sources/${source.source_id}/personal-data-grants`,
+    admin,
+    { grants: [] },
+    'PUT',
+  );
+  assert.equal((await request(path, employee, body)).status, 404);
+  assert.doesNotMatch(
+    (await request(`/v1/inquiries/${key}`, employee)).body.answer,
+    /812-3456-7890/,
+  );
+  const logs = await db.auditEvent.findMany({ where: { inquiryId: key } });
+  assert.ok(logs.some((e) => e.eventType === 'PERSONAL_DATA_DISCLOSED'));
+  assert.doesNotMatch(
+    JSON.stringify(logs),
+    /812-3456-7890|1234567890123456|private.person@example.test/,
+  );
+});
+
+test('annotation-based categories remain masked and can be disclosed independently', async () => {
+  const records = [
+    [
+      'EMAIL',
+      'CONTACT_PERSON',
+      'What is the email address?',
+      'private.employee@example.test',
+    ],
+    [
+      'ADDRESS',
+      'FULFILL_SERVICE',
+      'Tampilkan alamat untuk layanan pengiriman',
+      'Jalan Contoh 123',
+    ],
+    [
+      'DATE_OF_BIRTH',
+      'VERIFY_IDENTITY',
+      'What is the date of birth?',
+      '1995-03-14',
+    ],
+    [
+      'BANK_ACCOUNT',
+      'PROCESS_REIMBURSEMENT',
+      'Berapa nomor rekening untuk reimbursement?',
+      '000111222333',
+    ],
+    [
+      'NAME',
+      'IDENTIFY_PERSON',
+      'Tampilkan nama lengkap pegawai',
+      'Demo Private Person',
+    ],
+    [
+      'NPWP',
+      'TAX_ADMINISTRATION',
+      'Berapa NPWP untuk administrasi pajak?',
+      '00.000.000.0-000.000',
+    ],
+    [
+      'PASSPORT_NUMBER',
+      'VERIFY_IDENTITY',
+      'What is the passport number?',
+      'A1234567',
+    ],
+    [
+      'SALARY',
+      'PAYROLL_ADMINISTRATION',
+      'Tampilkan gaji untuk administrasi payroll',
+      'Rp12.000.000',
+    ],
+    [
+      'HEALTH_INFORMATION',
+      'BENEFITS_ADMINISTRATION',
+      'Tampilkan informasi kesehatan untuk benefit',
+      'Synthetic confidential health detail',
+    ],
+  ];
+  for (const [field_type, purpose, question, value] of records) {
+    const content = `Private fixture: ${value}`;
+    const source = await ingest({
+      type: 'DOCUMENT',
+      title: `${field_type} fixture`,
+      content,
+      personal_data_annotations: [
+        { field_type, start: content.indexOf(value), end: content.length },
+      ],
+      permissions: [{ subject_type: 'USER', subject_id: employeeId }],
+    });
+    const target = {
+      source_id: source.source_id,
+      chunk_id: source.chunks[0].chunk_id,
+    };
+    assert.ok(
+      !(
+        await request(
+          `/v1/sources/${target.source_id}/evidence?chunk_id=${target.chunk_id}`,
+          employee,
+        )
+      ).body.excerpt.includes(value),
+    );
+    const inquiry = await request('/v1/inquiries', employee, {
+      question,
+      personal_data_request: { ...target, field_type, purpose },
+    });
+    assert.equal(inquiry.status, 201, JSON.stringify(inquiry.body));
+    const key = inquiry.body.inquiry_id;
+    await request(
+      `/v1/sources/${target.source_id}/personal-data-grants`,
+      admin,
+      {
+        grants: [
+          { field_type, purpose, subject_type: 'USER', subject_id: employeeId },
+        ],
+      },
+      'PUT',
+    );
+    const result = await request(
+      `/v1/sources/${target.source_id}/personal-data`,
+      employee,
+      { inquiry_id: key, chunk_id: target.chunk_id },
+    );
+    assert.equal(result.body.value, value, JSON.stringify(result.body));
+    assert.equal(
+      (
+        await request(
+          `/v1/sources/${target.source_id}/personal-data`,
+          outsider,
+          { inquiry_id: key, chunk_id: target.chunk_id },
+        )
+      ).status,
+      404,
+    );
+    if (field_type === 'NAME') {
+      const token = (
+        await request('/v1/auth/tool-token', employee, { inquiry_id: key })
+      ).body.access_token;
+      await request(`/v1/inquiries/${key}/answer`, token, {
+        status: 'ANSWERED',
+        answer: value,
+        citations: [target],
+      });
+      assert.equal(
+        (await request(`/v1/inquiries/${key}`, employee)).body.answer,
+        value,
+      );
+      await request(
+        `/v1/sources/${target.source_id}/personal-data-grants`,
+        admin,
+        { grants: [] },
+        'PUT',
+      );
+      assert.ok(
+        !(await request(`/v1/inquiries/${key}`, employee)).body.answer.includes(
+          value,
+        ),
+      );
+    }
+  }
+});
+
+test('personal-data disclosure rejects ambiguous values and foreign grants', async () => {
+  const source = await ingest({
+    type: 'DOCUMENT',
+    title: 'Ambiguous contact fixture',
+    content: 'First +62 812-3456-7890. Second +62 813-2222-3333.',
+    permissions: [{ subject_type: 'USER', subject_id: employeeId }],
+  });
+  const target = {
+    source_id: source.source_id,
+    chunk_id: source.chunks[0].chunk_id,
+  };
+  const inquiry = await request('/v1/inquiries', employee, {
+    question: 'What is the phone number?',
+    personal_data_request: {
+      ...target,
+      field_type: 'PHONE',
+      purpose: 'CONTACT_PERSON',
+    },
+  });
+  const foreign = (await request('/v1/auth/me', outsider)).body.id;
+  assert.equal(
+    (
+      await request(
+        `/v1/sources/${target.source_id}/personal-data-grants`,
+        admin,
+        {
+          grants: [
+            {
+              field_type: 'PHONE',
+              purpose: 'CONTACT_PERSON',
+              subject_type: 'USER',
+              subject_id: foreign,
+            },
+          ],
+        },
+        'PUT',
+      )
+    ).status,
+    400,
+  );
+  await request(
+    `/v1/sources/${target.source_id}/personal-data-grants`,
+    admin,
+    {
+      grants: [
+        {
+          field_type: 'PHONE',
+          purpose: 'CONTACT_PERSON',
+          subject_type: 'USER',
+          subject_id: employeeId,
+        },
+      ],
+    },
+    'PUT',
+  );
+  assert.equal(
+    (
+      await request(`/v1/sources/${target.source_id}/personal-data`, employee, {
+        inquiry_id: inquiry.body.inquiry_id,
+        chunk_id: target.chunk_id,
+      })
+    ).status,
+    404,
+  );
+});
+
+test('annotated personal values stay masked in policies, cases and reviewer metadata', async () => {
+  const value = 'Example Confidential Name';
+  const me = (await request('/v1/auth/me', admin)).body;
+  const source = await ingest({
+    type: 'DOCUMENT',
+    title: 'Private metadata fixture',
+    state: 'APPROVED',
+    issuer_id: me.id,
+    content: value,
+    personal_data_annotations: [
+      { field_type: 'NAME', start: 0, end: value.length },
+    ],
+    permissions: [
+      { subject_type: 'ORGANIZATION', subject_id: orgId },
+      { subject_type: 'USER', subject_id: reviewerId, action: 'REVIEW' },
+    ],
+  });
+  const target = {
+    source_id: source.source_id,
+    chunk_id: source.chunks[0].chunk_id,
+  };
+  await request('/v1/policies', admin, {
+    evidence_chunk_id: target.chunk_id,
+    domain: 'private-metadata',
+    predicate: { person: value },
+    result: value,
+    authority: value,
+    valid_from: '2026-01-01T00:00:00Z',
+  });
+  const policy = await request('/v1/policies/resolve', employee, {
+    domain: 'private-metadata',
+    context: { person: value },
+  });
+  assert.equal(policy.body.status, 'SUPPORTED');
+  assert.ok(!JSON.stringify(policy.body).includes(value));
+  await request('/v1/cases', admin, {
+    domain: 'private-metadata',
+    context: { type: 'fixture' },
+    outcome: value,
+    authority: value,
+    evidence_chunk_ids: [target.chunk_id],
+  });
+  const cases = await request('/v1/cases/search', employee, {
+    domain: 'private-metadata',
+    context: { type: 'fixture' },
+  });
+  assert.ok(!JSON.stringify(cases.body).includes(value));
+  const inquiry = await request('/v1/inquiries', employee, {
+    question: 'Explain the fixture metadata',
+  });
+  const key = inquiry.body.inquiry_id;
+  await request(`/v1/inquiries/${key}/answer`, agent, {
+    status: 'ANSWERED',
+    answer: value,
+    citations: [target],
+  });
+  assert.ok(
+    !(await request(`/v1/inquiries/${key}`, employee)).body.answer.includes(
+      value,
+    ),
+  );
+  const feedback = await request('/v1/feedback', employee, {
+    inquiry_id: key,
+    domain: 'fuel',
+    action: 'COMMENT',
+    reason: value,
+    proposed_case: {
+      domain: 'fuel',
+      context: { person: value },
+      outcome: value,
+      authority: value,
+      evidence_chunk_ids: [target.chunk_id],
+    },
+  });
+  const detail = await request(
+    `/v1/feedback/${feedback.body.feedback_id}`,
+    reviewer,
+  );
+  assert.equal(detail.status, 200, JSON.stringify(detail.body));
+  assert.ok(!JSON.stringify(detail.body).includes(value));
+  const pending = await request('/v1/feedback?domain=fuel', reviewer);
+  assert.ok(!JSON.stringify(pending.body).includes(value));
+});
+
+test('personal-data annotations are masked across overlapping chunk boundaries', async () => {
+  const value = 'PRIVATE_ADDRESS_VALUE_WITH_SPACES';
+  const content = 'a'.repeat(1590) + value + 'b'.repeat(400);
+  const source = await ingest({
+    type: 'DOCUMENT',
+    title: 'Split private field',
+    content,
+    personal_data_annotations: [
+      { field_type: 'ADDRESS', start: 1590, end: 1590 + value.length },
+    ],
+    permissions: [{ subject_type: 'USER', subject_id: employeeId }],
+  });
+  for (const chunk of source.chunks) {
+    const result = await request(
+      `/v1/sources/${source.source_id}/evidence?chunk_id=${chunk.chunk_id}`,
+      employee,
+    );
+    assert.equal(result.status, 200);
+    assert.ok(!result.body.excerpt.includes(value));
+    if (chunk.span_start <= 1590 && chunk.span_end > 1590)
+      assert.match(result.body.excerpt, /REDACTED_ADDRESS/);
+  }
+  assert.equal(
+    (
+      await request('/v1/knowledge/ingest', admin, {
+        type: 'DOCUMENT',
+        title: 'Invalid annotations',
+        content: 'short',
+        personal_data_annotations: [{ field_type: 'NAME', start: 0, end: 100 }],
+      })
+    ).status,
+    400,
+  );
+});
+
+test('shared demo fixtures seed reproducible policies, permissions and privacy scenarios', async () => {
+  const { seedDemo } = require('../dist/demo/seed-demo');
+  const seeded = await seedDemo(app, { slug: 'shared-demo-test', password });
+  assert.equal(seeded.synthetic, true);
+  assert.equal(seeded.scenarios.length, 7);
+  const demoEmployee = await login('employee@example.test', seeded.org_slug);
+  assert.deepEqual(
+    (await request('/v1/knowledge/search', demoEmployee, { query: 'Kenari' }))
+      .body.results,
+    [],
+  );
+  const fuel = await request('/v1/policies/resolve', demoEmployee, {
+    domain: 'fuel',
+    context: {},
+  });
+  assert.equal(fuel.body.applicable[0].result, 'Rp750000');
+  const history = await request('/v1/truth/reconcile', demoEmployee, {
+    domain: 'procurement',
+    context: { type: 'saas', amount: 180000000 },
+    max_results: 30,
+  });
+  assert.equal(history.body.operational_truth.comparable_sample_size, 26);
+  assert.equal(
+    history.body.operational_truth.authority_pattern.find(
+      (p) => p.authority === 'VP',
+    ).count,
+    23,
+  );
+  assert.equal(history.body.gap_flag, true);
+  const types = new Set(
+    (
+      await request('/v1/knowledge/search', demoEmployee, {
+        query: 'onboarding',
+      })
+    ).body.results.map((r) => r.source_type),
+  );
+  assert.equal(types.size, 3);
+  assert.equal(
+    (await request('/v1/escalations/resolve', demoEmployee, { domain: 'fuel' }))
+      .body.status,
+    'AVAILABLE',
+  );
+  for (const key of ['phone_allowed', 'nik_denied']) {
+    const scenario = seeded.scenarios.find((s) => s.key === key);
+    const inquiry = await request('/v1/inquiries', demoEmployee, {
+      question: scenario.question,
+      personal_data_request: scenario.personal_data_request,
+    });
+    assert.equal(inquiry.status, 201, JSON.stringify(inquiry.body));
+    const target = scenario.personal_data_request;
+    const result = await request(
+      `/v1/sources/${target.source_id}/personal-data`,
+      demoEmployee,
+      { inquiry_id: inquiry.body.inquiry_id, chunk_id: target.chunk_id },
+    );
+    assert.equal(
+      result.status,
+      key === 'phone_allowed' ? 201 : 404,
+      JSON.stringify(result.body),
+    );
+  }
+  await assert.rejects(() =>
+    seedDemo(app, { slug: seeded.org_slug, password }),
+  );
+  assert.equal(
+    await db.organization.count({ where: { slug: seeded.org_slug } }),
+    1,
+  );
+});
+
 test('last admin protection and deactivation revoke user and agent sessions immediately', async () => {
   const current = await request('/v1/auth/me', admin);
   assert.equal(

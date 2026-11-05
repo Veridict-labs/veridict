@@ -15,6 +15,7 @@ import {
   type Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
+import { randomUUID } from 'node:crypto';
 import {
   answerInput,
   evidenceInput,
@@ -24,6 +25,8 @@ import {
   reconcileInput,
   resolveInput,
   searchInput,
+  escalationInput,
+  personalDataInput,
 } from '@veridict/contracts';
 import { AuthService } from '../auth/auth.service';
 import type { Actor, AuthRequest } from '../auth/actor';
@@ -32,8 +35,10 @@ import { PolicyService } from '../policy/policy.service';
 import { FeedbackService } from '../feedback/feedback.service';
 import { InquiriesService } from '../inquiries/inquiries.service';
 import { parse } from '../common/validation';
-import { AuditService } from '../audit/audit.service';
+import { AuditService, digest } from '../audit/audit.service';
 import { SecurityService } from '../auth/security.service';
+import { EscalationsService } from '../escalations/escalations.service';
+import { PersonalDataService } from '../personal-data/personal-data.service';
 
 type ToolDefinition = {
   name: string;
@@ -42,6 +47,20 @@ type ToolDefinition = {
   readOnly: boolean;
   run: (actor: Actor, input: unknown) => Promise<unknown>;
 };
+
+function correlatedSchema(schema: z.ZodType): Tool['inputSchema'] {
+  const json = z.toJSONSchema(schema) as Tool['inputSchema'];
+  return {
+    ...json,
+    properties: {
+      ...json.properties,
+      inquiry_id: json.properties?.inquiry_id ?? {
+        type: 'string',
+        format: 'uuid',
+      },
+    },
+  };
+}
 
 @Controller('mcp')
 export class McpController {
@@ -53,11 +72,38 @@ export class McpController {
     private readonly inquiries: InquiriesService,
     private readonly audit: AuditService,
     private readonly security: SecurityService,
+    private readonly escalations: EscalationsService,
+    private readonly personalData: PersonalDataService,
   ) {}
 
   private tools(): ToolDefinition[] {
     const complete = answerInput.extend({ inquiry_id: id });
     return [
+      {
+        name: 'get_personal_data',
+        description:
+          'Reveal one explicitly requested personal-data value only for a user-created, purpose-bound inquiry with current source READ and category/purpose grant. Search and evidence excerpts remain masked.',
+        schema: personalDataInput,
+        readOnly: true,
+        run: (a, i) => {
+          const v = parse(personalDataInput, i);
+          return this.personalData.disclose(
+            a,
+            v.inquiry_id,
+            v.source_id,
+            v.chunk_id,
+          );
+        },
+      },
+      {
+        name: 'resolve_domain_owner',
+        description:
+          'Find a currently visible subject-matter owner when evidence is insufficient. Unavailable and restricted directory entries return the same result.',
+        schema: escalationInput,
+        readOnly: true,
+        run: (a, i) =>
+          this.escalations.resolve(a, parse(escalationInput, i).domain),
+      },
       {
         name: 'search_authorized_knowledge',
         description:
@@ -148,7 +194,7 @@ export class McpController {
       tools: definitions.map((t) => ({
         name: t.name,
         description: t.description,
-        inputSchema: z.toJSONSchema(t.schema) as Tool['inputSchema'],
+        inputSchema: correlatedSchema(t.schema),
         annotations: {
           readOnlyHint: t.readOnly,
           destructiveHint: false,
@@ -158,26 +204,57 @@ export class McpController {
     }));
     server.setRequestHandler(CallToolRequestSchema, async (call) => {
       const tool = definitions.find((t) => t.name === call.params.name);
-      if (!tool)
+      let actor = await this.auth.authenticate(token);
+      const args = call.params.arguments ?? {};
+      try {
+        if (request.actor.inquiryId)
+          actor = this.security.forInquiry(actor, request.actor.inquiryId);
+        if (args.inquiry_id !== undefined)
+          actor = this.security.forInquiry(actor, parse(id, args.inquiry_id));
+        actor = { ...actor, toolCallId: randomUUID() };
+        await this.security.scope(actor, false, (tx) =>
+          this.audit.record(tx, actor, 'MCP_TOOL_STARTED', [], 'STARTED', {
+            tool: tool?.name ?? 'UNKNOWN_TOOL',
+          }),
+        );
+      } catch {
         return {
           isError: true,
           content: [
-            { type: 'text', text: JSON.stringify({ error: 'UNKNOWN_TOOL' }) },
+            {
+              type: 'text',
+              text: JSON.stringify({
+                error: 'UNAVAILABLE',
+                message: 'Tool request could not be completed',
+              }),
+            },
           ],
         };
+      }
       try {
-        // Recheck the token per invocation, including batched calls. Never capture
-        // an actor from a previous request or reuse a shared administrator session.
-        const actor = await this.auth.authenticate(token);
-        const result = await tool.run(actor, call.params.arguments ?? {});
+        if (!tool) throw new Error('Unknown tool');
+        const input = { ...args };
+        if (
+          ![
+            'submit_feedback',
+            'complete_inquiry',
+            'get_personal_data',
+          ].includes(tool.name)
+        )
+          delete input.inquiry_id;
+        const result = await tool.run(actor, input);
+        await this.audit.toolOutcome(
+          actor,
+          tool.name,
+          'ALLOWED',
+          digest(JSON.stringify(result)),
+        );
         return { content: [{ type: 'text', text: JSON.stringify(result) }] };
       } catch {
-        // All denied/missing resources use the same external tool result.
-        const actor = await this.auth.authenticate(token);
-        await this.security.scope(actor, false, (tx) =>
-          this.audit.record(tx, actor, 'MCP_TOOL_DENIED', [], 'UNAVAILABLE', {
-            tool: tool.name,
-          }),
+        await this.audit.toolOutcome(
+          actor,
+          tool?.name ?? 'UNKNOWN_TOOL',
+          'UNAVAILABLE',
         );
         return {
           isError: true,
