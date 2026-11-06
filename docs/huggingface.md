@@ -1,4 +1,6 @@
-# Hugging Face runtime
+# Optional Hugging Face runtime
+
+Gemini is now the primary provider: see [current setup](gemini.md). Set `AI_PROVIDER=huggingface` explicitly to use this adapter. There is no automatic provider fallback. The decision and 402 result below describe the earlier HF checkpoint.
 
 Keputusan implementasi 6 November 2026: aplikasi memakai orkestrasi agen di NestJS dengan model melalui Hugging Face Inference Providers. WorkBuddy menjadi konektor eksternal opsional; aplikasi tidak perlu menunggu WorkBuddy untuk memproses inquiry. Ini perubahan rancangan tim, bukan pernyataan tentang kewajiban teknologi lomba.
 

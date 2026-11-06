@@ -4,7 +4,7 @@ A monorepo for Veridict. The NestJS backend implements organization-scoped authe
 
 Product specification: [Veridict PRD](Veridict_PRD_v1_Track_A.md).
 
-The built-in Person 1 runtime uses Hugging Face Inference Providers. Create an inquiry, then call `POST /v1/inquiries/:id/run` as its owner to generate and persist an evidence-grounded answer. Configure backend-only `HF_TOKEN` and `HF_MODEL` in `apps/api/.env`; see the [HF setup and actual verification status](docs/huggingface.md). WorkBuddy remains an optional MCP connector. A new inquiry stays pending until explicitly processed; no background queue is enabled.
+The built-in Person 1 runtime uses Gemini by default (HF remains explicitly selectable). Create an inquiry, then call `POST /v1/inquiries/:id/run` as its owner to generate and persist an evidence-grounded answer. Configure backend-only `GEMINI_API_KEY` and `GEMINI_MODEL` in `apps/api/.env`; see the [Gemini setup and actual verification status](docs/gemini.md). WorkBuddy remains an optional MCP connector. A new inquiry stays pending until explicitly processed; no background queue is enabled.
 
 ## Stack
 
@@ -68,12 +68,12 @@ Default ports: frontend **3000**, backend **3001**, PostgreSQL **5432**. If you 
 
 Additional backend commands:
 
-| Command                   | Purpose                                                    |
-| ------------------------- | ---------------------------------------------------------- |
-| `npm run db:deploy`       | Apply committed database migrations                        |
-| `npm run admin:bootstrap` | Create a new organization and administrator after building |
-| `npm run test:api`        | Run unit and isolated PostgreSQL/MCP integration tests     |
-| `npm run test:agent`      | Test the Person 1 MCP client against local HTTP/MCP fixtures |
+| Command                   | Purpose                                                             |
+| ------------------------- | ------------------------------------------------------------------- |
+| `npm run db:deploy`       | Apply committed database migrations                                 |
+| `npm run admin:bootstrap` | Create a new organization and administrator after building          |
+| `npm run test:api`        | Run unit and isolated PostgreSQL/MCP integration tests              |
+| `npm run test:agent`      | Test the Person 1 MCP client against local HTTP/MCP fixtures        |
 | `npm run agent:smoke`     | Check a running API with a delegated user token; see Person 1 setup |
 
 The Prisma schema includes organizations, users, sessions, knowledge sources, chunks, permissions, policy claims, cases, inquiries, feedback, and audit events. Generate the client after schema changes; commit migrations alongside the schema.
@@ -103,7 +103,8 @@ Tests create and remove their own PostgreSQL container on an automatically assig
 - [Person 2 checklist and Person 1 handoff](docs/person-2-checklist.md)
 - [Team task division and implementation plan](docs/team-task-division.md)
 - [Person 1 runtime checkpoints](docs/person-1-checkpoints.md)
-- [Hugging Face runtime and setup](docs/huggingface.md)
+- [Gemini runtime and setup](docs/gemini.md)
+- [Optional Hugging Face provider](docs/huggingface.md)
 - [Architecture and trust boundaries](docs/architecture.md)
 - [Accountability](docs/accountability.md)
 - [Shared demo fixtures and seed](docs/demo-fixtures.md)

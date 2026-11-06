@@ -36,3 +36,17 @@ After synchronizing backend `a043785`, Person 1 implemented the NestJS-hosted HF
 The live failure is preserved in [the actual report](evaluation/hf-live-2026-11-06T11-30-48-588Z.json). No further live scenarios were attempted after that provider error. This establishes error handling and connectivity to the HF route, not valid model-generated answers or account credit availability. The full live suite remains pending until the operator resolves billing.
 
 New tests exercise owner-only processing, inquiry-bound session cleanup, strict tool dispatch, fabricated/nested citation rejection, support-check abstention, no-evidence clarification, optional organization billing, bounded calls, revocation before the next model request and before persistence, changed masking within a tool batch, and history dependencies for all model-exposed chunks. Scripted tests do not measure the real model's entailment accuracy or prompt-injection robustness. The new runtime remains lexical unless real matched embeddings are supplied.
+
+## Gemini checkpoint — 6 November 2026
+
+The primary provider is now Gemini with gemini-3.5-flash; HF is an explicit optional provider. Provider errors never trigger fallback. Google tool-call signatures are preserved only in transient model history. Tool-only responses without content are normalized. Credentials stay in ignored apps/api/.env.
+
+- npm run test:agent: **36 passed**, 0 failed; includes Gemini transport, signature round trip, safe errors, no fallback and bounded verification context.
+- npm run test:api: **46 passed**, 0 failed; PostgreSQL/HTTP/MCP regression and explicit provider factory selection.
+- npm run lint and npm run typecheck: passed across workspaces. API/contracts/agent build passed through tests; no frontend code changes in this checkpoint.
+
+A small Gemini Lite preflight returned HTTP 200. The older 2.5 Lite returned 404 with a model replacement recommendation. Real Lite application attempts exposed missing-content parsing and strict-tool validation failures, budget exhaustion and provider 503 errors; these are preserved in the evaluation reports.
+
+[Gemini Flash application run](evaluation/gemini-live-2026-11-06T12-13-03-584Z.json) returned HTTP 201 and persisted a safe INSUFFICIENT_EVIDENCE answer after support rejection. It did **not** pass the fuel amount acceptance check. Support checking was then corrected to include the same authorized tool observations/metadata available during drafting, with a separate 180000-character bound. Local regression passed. [The subsequent five-scenario attempt](evaluation/gemini-live-2026-11-06T12-15-03-878Z.json) stopped on the first case with AI_RATE_LIMITED (provider 429); the other four scenarios were not attempted. Cloud requests stopped at that point.
+
+The latest support-check change and full live suite remain unvalidated against the provider. Do not label Person 1 fully accepted. Check the project's actual rate/quota limits before a deliberate future live run. No billing upgrade or top-up was performed. See [current checkpoints](person-1-checkpoints.md).

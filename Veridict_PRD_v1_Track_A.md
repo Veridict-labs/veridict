@@ -8,7 +8,7 @@ Trusted Organizational Knowledge Intelligence — Organizational Truth Reconcili
 
 Status: Proposed / implementation-ready specification. Nothing in this PRD claims a working integration, completed benchmark, or measured business impact.
 
-Implementation amendment, 6 November 2026: the user selected a NestJS-hosted agent with Hugging Face Inference Providers as application runtime. WorkBuddy/MCP remains optional. References below to WorkBuddy as mandatory runtime describe the original proposal and are superseded for implementation by [the current runtime decision](docs/huggingface.md) and [Person 1 checkpoints](docs/person-1-checkpoints.md). Competition-specific tool requirements still need verification against the organizer handbook. Live HF completion is not yet validated: the first call returned HTTP 402.
+Implementation amendment, 6 November 2026: the user selected a NestJS-hosted agent with Gemini as the default application model provider; Hugging Face remains optional. WorkBuddy/MCP remains optional. References below to WorkBuddy as mandatory runtime describe the original proposal and are superseded for implementation by [the current runtime decision](docs/gemini.md) and [Person 1 checkpoints](docs/person-1-checkpoints.md). Competition-specific tool requirements still need verification against the organizer handbook. The prior HF call returned HTTP 402. Gemini connectivity and evaluation are recorded separately in the current runtime guide.
 
 ## Document control
 

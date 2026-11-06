@@ -1,0 +1,95 @@
+{
+  "kind": "AI_LIVE_SYNTHETIC_EVALUATION",
+  "provider": "gemini",
+  "synthetic": true,
+  "workbuddy_verified": false,
+  "official_organizer_tests": false,
+  "checked_at": "2026-11-06T12:10:35.146Z",
+  "model": "gemini-3.5-flash-lite",
+  "database": "temporary container, removed after evaluation",
+  "scenarios": [
+    {
+      "key": "fuel_conflict",
+      "question": "Berapa tunjangan bensin bulanan yang berlaku?",
+      "expected": {
+        "policy_status": "SUPPORTED",
+        "official_result": "Rp750000",
+        "citations": [
+          "fuel_old",
+          "fuel_new"
+        ]
+      },
+      "http_status": 503,
+      "error": "AI_UNAVAILABLE",
+      "status": "PENDING",
+      "answer": null,
+      "official_truth": null,
+      "operational_truth": null,
+      "assumptions": [],
+      "limitations": [],
+      "evidence": [],
+      "model_calls": null,
+      "trace": [
+        {
+          "event_type": "INQUIRY_CREATED",
+          "tool": null,
+          "decision": "PENDING"
+        },
+        {
+          "event_type": "INQUIRY_OPENED",
+          "tool": null,
+          "decision": "ALLOWED"
+        },
+        {
+          "event_type": "AUTH_TOOL_TOKEN",
+          "tool": null,
+          "decision": "ALLOWED"
+        },
+        {
+          "event_type": "AI_RUN_STARTED",
+          "tool": null,
+          "decision": "STARTED"
+        },
+        {
+          "event_type": "AI_TOOL_STARTED",
+          "tool": "search_authorized_knowledge",
+          "decision": "STARTED"
+        },
+        {
+          "event_type": "KNOWLEDGE_SEARCH",
+          "tool": null,
+          "decision": "ALLOWED"
+        },
+        {
+          "event_type": "AI_TOOL_COMPLETED",
+          "tool": "search_authorized_knowledge",
+          "decision": "ALLOWED"
+        },
+        {
+          "event_type": "AI_RUN_FAILED",
+          "tool": null,
+          "decision": "FAILED"
+        },
+        {
+          "event_type": "INQUIRY_OPENED",
+          "tool": null,
+          "decision": "ALLOWED"
+        }
+      ],
+      "checks": {
+        "completed": false,
+        "structured": false,
+        "cited_if_answered": true,
+        "expected_amount": false
+      },
+      "passed": false
+    }
+  ],
+  "summary": {
+    "attempted": 1,
+    "passed": 0,
+    "limitations": [
+      "Synthetic automated checks do not establish semantic correctness, complete injection resistance, or organizer scores. Manual review of every answer and its evidence is required."
+    ]
+  }
+}
