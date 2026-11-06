@@ -4,7 +4,7 @@ A monorepo for Veridict. The NestJS backend implements organization-scoped authe
 
 Product specification: [Veridict PRD](Veridict_PRD_v1_Track_A.md).
 
-WorkBuddy orchestration and the embedding provider remain integration tasks for Person 1. A new inquiry stays pending until an external agent submits an answer.
+The built-in Person 1 runtime uses Hugging Face Inference Providers. Create an inquiry, then call `POST /v1/inquiries/:id/run` as its owner to generate and persist an evidence-grounded answer. Configure backend-only `HF_TOKEN` and `HF_MODEL` in `apps/api/.env`; see the [HF setup and actual verification status](docs/huggingface.md). WorkBuddy remains an optional MCP connector. A new inquiry stays pending until explicitly processed; no background queue is enabled.
 
 ## Stack
 
@@ -102,7 +102,8 @@ Tests create and remove their own PostgreSQL container on an automatically assig
 - [Backend integration guide and limits](docs/backend.md)
 - [Person 2 checklist and Person 1 handoff](docs/person-2-checklist.md)
 - [Team task division and implementation plan](docs/team-task-division.md)
-- [Person 1 checkpoints and WorkBuddy setup](docs/person-1-checkpoints.md)
+- [Person 1 runtime checkpoints](docs/person-1-checkpoints.md)
+- [Hugging Face runtime and setup](docs/huggingface.md)
 - [Architecture and trust boundaries](docs/architecture.md)
 - [Accountability](docs/accountability.md)
 - [Shared demo fixtures and seed](docs/demo-fixtures.md)

@@ -1,5 +1,7 @@
 # Veridict agent instructions
 
+Optional external-client instructions. As of 6 November 2026 the primary web runtime is [NestJS + Hugging Face](../../docs/huggingface.md). WorkBuddy is not required for the owner-only inquiry run endpoint; these instructions remain for exercising the external MCP path.
+
 Use these as trusted agent instructions when configuring the Veridict WorkBuddy conversation. They are a prompt contract; their presence does not prove runtime compliance. Apply them only to Veridict workplace knowledge questions.
 
 ## Identity and task

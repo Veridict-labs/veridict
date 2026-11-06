@@ -1,12 +1,15 @@
 # Backend architecture and trust boundaries
 
-The backend owns identity, current authorization, persisted evidence, deterministic policy checks, and audit. Person 1 owns WorkBuddy orchestration and semantic answer validation; Person 3 owns employee/reviewer interfaces.
+The backend owns identity, current authorization, persisted evidence, deterministic policy checks, and audit. Person 1 owns the Hugging Face-backed runtime and answer support checks; Person 3 owns employee/reviewer interfaces. WorkBuddy is an optional external MCP client; see the [runtime decision and limits](huggingface.md).
 
 ```mermaid
 flowchart TD
   Web[Next.js frontend] -->|User bearer token| API[NestJS REST]
   Agent[WorkBuddy connector] -->|Per-user delegated token| MCP[Streamable HTTP MCP]
   API --> Guard[Database-verified identity and role]
+  API -->|Owner explicitly runs inquiry| Runtime[Grounded agent runtime]
+  Runtime -->|Authorized masked context| HF[Hugging Face router]
+  Runtime --> Guard
   MCP --> Guard
   Guard --> Scope[Organization lock and fresh session check]
   Scope --> ACL[Current READ and REVIEW grants]
@@ -28,7 +31,7 @@ Access is denied without an explicit matching grant. Administrators manage ACLs 
 
 Prisma manages relational models/migrations; parameterized SQL handles full-text and pgvector retrieval. Exact filtered scans prioritize correctness for the hackathon corpus. Scaling and approximate indexes need separate measurement.
 
-The backend makes no external LLM or WorkBuddy call. Inquiries wait for the connector to complete them. This boundary allows all three team members to work in parallel while the actual WorkBuddy connection is validated.
+The owner-only `/v1/inquiries/:id/run` endpoint calls Hugging Face with a temporary inquiry-bound AGENT session. Only masked evidence from authorized read services is passed to the model. All model-exposed chunks become history dependencies, with reauthorization between turns and at persistence. A separate model-based support check can reject drafts; it is not proof of semantic entailment or complete injection resistance. Calls are bounded with no inference retry or credit top-up. External MCP completion remains supported. New inquiries are not automatically queued.
 Domain-owner handoff is backed by readable directory evidence. Personal-data disclosure additionally requires a category/purpose grant and an immutable user-created inquiry request. Known sensitive values stay redacted on ordinary evidence, policy, precedent, review, and answer views. Contextual fields require curator annotations; the system is not a general PII discovery model.
 
 Inquiry-bound agent sessions propagate server-generated tool-call IDs into audit. Owner-visible traces reauthorize their resource references; administrator audit remains organization-scoped. Shared synthetic fixtures are described in [the demo guide](demo-fixtures.md).

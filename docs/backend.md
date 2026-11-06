@@ -24,6 +24,8 @@ $me = Invoke-RestMethod -Uri "$api/v1/auth/me" -Headers $headers
 
 ## REST endpoints
 
+The Person 1 HF runtime is configured in [huggingface.md](huggingface.md). `POST /v1/inquiries/:id/run` accepts `{}` from the owner's USER session, invokes the bounded agent synchronously, and returns the stored status/provider/model/call count. Body fields cannot select a model, actor, or another inquiry. AGENT sessions cannot trigger another run. HF quota/auth failures return safe codes without provider response bodies; an unfinished inquiry retains its prior status. `/v1/inquiries/:id/trace` includes correlated `AI_RUN_*` and `AI_TOOL_*` events. The external-agent handoff below remains supported through MCP.
+
 | Method       | Path                                    | Access and purpose                                                |
 | ------------ | --------------------------------------- | ----------------------------------------------------------------- |
 | GET          | `/health`                               | Public liveness; returns `ok`                                     |

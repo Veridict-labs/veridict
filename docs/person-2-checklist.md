@@ -1,5 +1,7 @@
 # Checklist Person 2 dan handoff ke Person 1
 
+**Pembaruan 6 November 2026:** Person 1 kini mengimplementasikan runtime NestJS + Hugging Face; WorkBuddy menjadi konektor opsional. Lihat [checkpoint aktual](person-1-checkpoints.md) dan [setup HF](huggingface.md). Checklist di bawah mencatat baseline handoff; pekerjaan Person 1 yang kini tersedia tidak lagi seluruhnya pending. Pengujian backend terbaru tercatat di [verification.md](verification.md), sedangkan uji HF nyata pertama masih mendapat 402.
+
 **Pembaruan implementasi:** branch `feat/veridict-backend` menambahkan routing owner ber-ACL, audit per inquiry, disclosure berizin untuk 11 kategori personal data, dan fixture/seed bersama. Setelah integrasi main terbaru, 42 tes backend dan 10 tes client agent lulus, beserta build/lint/typecheck seluruh workspace. Lihat [kontrak terbaru](backend.md), [fixture demo](demo-fixtures.md), dan [verifikasi](verification.md). Baseline di bawah tetap menjadi catatan historis; penerimaan WorkBuddy nyata dan evaluasi end-to-end masih memerlukan tim.
 
 Tanggal penyusunan: 4 November 2026. Baseline kode: `f15bbed`.
