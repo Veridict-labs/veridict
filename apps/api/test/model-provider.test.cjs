@@ -23,7 +23,7 @@ test('provider selection defaults to Gemini and never silently falls back to an 
     const provider = new ModelProvider();
     const gemini = provider.create();
     assert.equal(gemini.provider, 'gemini');
-    assert.equal(gemini.modelId, 'gemini-3.5-flash-lite');
+    assert.equal(gemini.modelId, 'gemini-3.5-flash');
     assert.ok(gemini.model instanceof GeminiModel);
     delete process.env.GEMINI_API_KEY;
     assert.throws(

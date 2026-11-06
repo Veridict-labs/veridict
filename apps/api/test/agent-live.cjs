@@ -13,7 +13,7 @@ async function main() {
     throw new Error('AI_PROVIDER must be gemini or huggingface');
   const model =
     provider === 'gemini'
-      ? (process.env.GEMINI_MODEL ?? 'gemini-3.5-flash-lite')
+      ? (process.env.GEMINI_MODEL ?? 'gemini-3.5-flash')
       : process.env.HF_MODEL;
   const key =
     provider === 'gemini' ? process.env.GEMINI_API_KEY : process.env.HF_TOKEN;
@@ -135,6 +135,7 @@ async function main() {
           'multi_source',
         ]
       : ['fuel_conflict'];
+    report.requested_scenarios = selected;
     for (const scenarioKey of selected) {
       const scenario = manifest.scenarios.find((s) => s.key === scenarioKey);
       const created = await request('/v1/inquiries', token, {

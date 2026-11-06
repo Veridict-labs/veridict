@@ -15,7 +15,7 @@ export class ModelProvider {
   } {
     const provider = process.env.AI_PROVIDER ?? 'gemini';
     if (provider === 'gemini') {
-      const modelId = process.env.GEMINI_MODEL ?? 'gemini-3.5-flash-lite';
+      const modelId = process.env.GEMINI_MODEL ?? 'gemini-3.5-flash';
       return {
         provider,
         modelId,

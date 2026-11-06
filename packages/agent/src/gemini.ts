@@ -150,7 +150,10 @@ export class GeminiModel implements AgentModel {
             tool_calls: (calls as Record<string, unknown>[]).map((call) => ({
               id: call.id as string,
               type: 'function' as const,
-              function: call.function as ToolCall['function'],
+              function: {
+                name: (call.function as ToolCall['function']).name,
+                arguments: (call.function as ToolCall['function']).arguments,
+              },
               ...signature(call),
             })),
           }

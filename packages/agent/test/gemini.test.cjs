@@ -41,7 +41,11 @@ test('Gemini preserves opaque tool signatures across turns without carrying arbi
   const call = {
     id: 'call_synthetic',
     type: 'function',
-    function: { name: 'get_evidence', arguments: '{}' },
+    function: {
+      name: 'get_evidence',
+      arguments: '{}',
+      private_field: 'discard',
+    },
     extra_content: {
       google: {
         thought_signature: 'opaque-synthetic-signature',
@@ -84,6 +88,10 @@ test('Gemini preserves opaque tool signatures across turns without carrying arbi
     google: { thought_signature: 'opaque-synthetic-signature' },
   });
   assert.equal(body.messages[0].tool_calls[0].private_field, undefined);
+  assert.equal(
+    body.messages[0].tool_calls[0].function.private_field,
+    undefined,
+  );
   assert.equal(requests, 2);
 });
 

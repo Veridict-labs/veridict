@@ -61,7 +61,11 @@ function setup(model, result) {
 }
 
 test('grounded answer uses actual evidence and a separate support check', async () => {
-  const e = evidence();
+  const e = {
+    ...evidence(),
+    source_state: 'APPROVED',
+    valid_from: '2026-02-01T00:00:00.000Z',
+  };
   const model = scripted([
     tool('search_authorized_knowledge', { query: 'fuel' }),
     tool('complete_inquiry', draft(e)),
@@ -74,10 +78,38 @@ test('grounded answer uses actual evidence and a separate support check', async 
   assert.equal(result.modelCalls, 3);
   assert.equal(model.requests.at(-1).tools.length, 0);
   assert.ok(model.requests.at(-1).messages[1].content.includes(e.excerpt));
+  const verification = JSON.parse(model.requests.at(-1).messages[1].content);
+  assert.equal(
+    verification.tool_observations[0].tool,
+    'search_authorized_knowledge',
+  );
+  assert.equal(
+    verification.tool_observations[0].result.results[0].source_state,
+    'APPROVED',
+  );
+  assert.equal(
+    verification.tool_observations[0].result.results[0].valid_from,
+    e.valid_from,
+  );
   assert.deepEqual(
     run.dispatched.map((c) => c.name),
     ['search_authorized_knowledge'],
   );
+});
+
+test('support context includes tool metadata but rejects oversized verification requests', async () => {
+  const e = evidence('x'.repeat(60000));
+  const model = scripted([
+    tool('search_authorized_knowledge', { query: 'fuel' }),
+    tool('get_evidence', cite(e)),
+    tool('complete_inquiry', draft(e)),
+  ]);
+  const run = setup(model, { results: [e] });
+  await assert.rejects(
+    runGroundedAgent(run.input),
+    (error) => error.code === 'AI_BUDGET_EXCEEDED',
+  );
+  assert.equal(model.requests.length, 3);
 });
 
 test('unknown tools and model-supplied identity never reach the dispatcher', async () => {
