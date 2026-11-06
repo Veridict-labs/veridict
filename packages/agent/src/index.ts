@@ -199,3 +199,5 @@ export async function runMcpSmoke(input: {
     await transport.close().catch(() => {});
   }
 }
+
+export * from './gemini';

@@ -28,7 +28,8 @@
     "db:studio": "npm run db:studio -w @veridict/api",
     "db:deploy": "npm run db:deploy -w @veridict/api",
     "admin:bootstrap": "npm run admin:bootstrap -w @veridict/api",
-    "demo:seed": "npm run demo:seed -w @veridict/api"
+    "demo:seed": "npm run demo:seed -w @veridict/api",
+    "test:ai:live": "npm run test:ai:live -w @veridict/api --"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",

@@ -1914,8 +1914,8 @@ function hfTool(name, args) {
 }
 
 test('HF runtime completes an owner inquiry with correlated tools and revokes all exposed context', async () => {
-  const { HuggingFaceProvider } = require('../dist/agent/huggingface.provider');
-  const provider = app.get(HuggingFaceProvider);
+  const { ModelProvider } = require('../dist/agent/model.provider');
+  const provider = app.get(ModelProvider);
   const original = provider.create;
   let modelCalls = 0;
   const primary = await ingest({
@@ -1940,6 +1940,7 @@ test('HF runtime completes an owner inquiry with correlated tools and revokes al
     chunk_id: primary.chunks[0].chunk_id,
   };
   provider.create = () => ({
+    provider: 'gemini',
     modelId: 'test/synthetic',
     model: {
       complete: async () => {
@@ -2028,9 +2029,9 @@ test('HF runtime completes an owner inquiry with correlated tools and revokes al
 });
 
 test('HF quota failure leaves the inquiry pending, releases the session and returns a safe error', async () => {
-  const { HuggingFaceProvider } = require('../dist/agent/huggingface.provider');
+  const { ModelProvider } = require('../dist/agent/model.provider');
   const { AgentError } = require('@veridict/agent');
-  const provider = app.get(HuggingFaceProvider);
+  const provider = app.get(ModelProvider);
   const original = provider.create;
   const inquiry = (
     await request('/v1/inquiries', reviewer, {
@@ -2038,6 +2039,7 @@ test('HF quota failure leaves the inquiry pending, releases the session and retu
     })
   ).body.inquiry_id;
   provider.create = () => ({
+    provider: 'gemini',
     modelId: 'test/synthetic',
     model: {
       complete: async () => {
@@ -2065,8 +2067,8 @@ test('HF quota failure leaves the inquiry pending, releases the session and retu
 });
 
 test('HF completion rechecks ACL after a model response and never stores a revoked answer', async () => {
-  const { HuggingFaceProvider } = require('../dist/agent/huggingface.provider');
-  const provider = app.get(HuggingFaceProvider);
+  const { ModelProvider } = require('../dist/agent/model.provider');
+  const provider = app.get(ModelProvider);
   const original = provider.create;
   const source = await ingest({
     type: 'DOCUMENT',
@@ -2081,6 +2083,7 @@ test('HF completion rechecks ACL after a model response and never stores a revok
   ).body.inquiry_id;
   let calls = 0;
   provider.create = () => ({
+    provider: 'gemini',
     modelId: 'test/synthetic',
     model: {
       complete: async () => {

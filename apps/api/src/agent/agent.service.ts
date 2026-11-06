@@ -32,14 +32,14 @@ import { evidence } from '../knowledge/content';
 import { PolicyService } from '../policy/policy.service';
 import { EscalationsService } from '../escalations/escalations.service';
 import { AuditService, digest } from '../audit/audit.service';
-import { HuggingFaceProvider } from './huggingface.provider';
+import { ModelProvider } from './model.provider';
 
 @Injectable()
 export class AgentService {
   private readonly active = new Set<string>();
   private readonly logger = new Logger(AgentService.name);
   constructor(
-    private readonly provider: HuggingFaceProvider,
+    private readonly provider: ModelProvider,
     private readonly auth: AuthService,
     private readonly security: SecurityService,
     private readonly inquiries: InquiriesService,
@@ -65,13 +65,13 @@ export class AgentService {
       const inquiry = await this.inquiries.get(user, inquiryId);
       if (!['PENDING', 'NEEDS_REVALIDATION'].includes(inquiry.status))
         throw new ConflictException('Inquiry already completed');
-      const { model, modelId } = this.provider.create();
+      const { provider, model, modelId } = this.provider.create();
       const session = await this.auth.issueToolToken(user, inquiryId);
       agent = await this.auth.authenticate(session.access_token);
       const actor = agent;
       await this.security.scope(actor, false, (tx) =>
         this.audit.record(tx, actor, 'AI_RUN_STARTED', [], 'STARTED', {
-          provider: 'huggingface',
+          provider,
           model: modelId,
         }),
       );
@@ -137,7 +137,7 @@ export class AgentService {
             [inquiryId],
             completed.status,
             {
-              provider: 'huggingface',
+              provider,
               model: modelId,
               model_calls: result.modelCalls,
             },
@@ -148,7 +148,7 @@ export class AgentService {
         );
       return {
         ...completed,
-        provider: 'huggingface',
+        provider,
         model: modelId,
         model_calls: result.modelCalls,
       };
