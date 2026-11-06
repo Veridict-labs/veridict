@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "nest start --watch",
-    "predev": "npm run build -w @veridict/contracts && prisma generate",
-    "prebuild": "npm run build -w @veridict/contracts && prisma generate",
+    "predev": "npm run build -w @veridict/contracts && npm run build -w @veridict/agent && prisma generate",
+    "prebuild": "npm run build -w @veridict/contracts && npm run build -w @veridict/agent && prisma generate",
     "build": "nest build",
     "start": "node dist/main.js",
     "lint": "eslint .",
@@ -16,9 +16,11 @@
     "db:deploy": "prisma migrate deploy",
     "admin:bootstrap": "node --env-file-if-exists=.env dist/scripts/bootstrap-admin.js",
     "demo:seed": "node --env-file-if-exists=.env dist/scripts/seed-demo.js",
+    "test:hf:live": "npm run build && node --env-file-if-exists=.env test/hf-live.cjs",
     "test": "npm run build && node --test --test-concurrency=1 test/*.test.cjs"
   },
   "dependencies": {
+    "@veridict/agent": "*",
     "@veridict/contracts": "*",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "@nestjs/throttler": "^6.7.1",

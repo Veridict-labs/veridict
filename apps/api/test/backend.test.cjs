@@ -1898,3 +1898,229 @@ test('bootstrap CLI creates an administrator once and rejects a duplicate organi
   assert.throws(() => execFileSync(process.execPath, args, options));
   assert.equal(await db.user.count({ where: { orgId: result.org_id } }), 1);
 });
+
+function hfTool(name, args) {
+  return {
+    role: 'assistant',
+    content: null,
+    tool_calls: [
+      {
+        id: randomUUID(),
+        type: 'function',
+        function: { name, arguments: JSON.stringify(args) },
+      },
+    ],
+  };
+}
+
+test('HF runtime completes an owner inquiry with correlated tools and revokes all exposed context', async () => {
+  const { HuggingFaceProvider } = require('../dist/agent/huggingface.provider');
+  const provider = app.get(HuggingFaceProvider);
+  const original = provider.create;
+  let modelCalls = 0;
+  const primary = await ingest({
+    type: 'DOCUMENT',
+    title: 'HF primary fixture',
+    content: 'hfcheckpoint Fuel allowance is Rp750000.',
+    permissions: [{ subject_type: 'ORGANIZATION', subject_id: orgId }],
+  });
+  const secondary = await ingest({
+    type: 'DOCUMENT',
+    title: 'HF secondary fixture',
+    content: 'hfcheckpoint Another accessible record.',
+    permissions: [{ subject_type: 'ORGANIZATION', subject_id: orgId }],
+  });
+  const inquiry = (
+    await request('/v1/inquiries', reviewer, {
+      question: 'Berapa tunjangan bensin hfcheckpoint?',
+    })
+  ).body.inquiry_id;
+  const citation = {
+    source_id: primary.source_id,
+    chunk_id: primary.chunks[0].chunk_id,
+  };
+  provider.create = () => ({
+    modelId: 'test/synthetic',
+    model: {
+      complete: async () => {
+        modelCalls++;
+        if (modelCalls === 1)
+          return hfTool('search_authorized_knowledge', {
+            query: 'hfcheckpoint',
+            limit: 2,
+          });
+        if (modelCalls === 2)
+          return hfTool('complete_inquiry', {
+            status: 'ANSWERED',
+            answer: 'Tunjangan bensin Rp750000.',
+            citations: [citation],
+          });
+        return { role: 'assistant', content: '{"supported":true}' };
+      },
+    },
+  });
+  try {
+    assert.equal(
+      (await request(`/v1/inquiries/${inquiry}/run`, outsider, {})).status,
+      404,
+    );
+    assert.equal(
+      (await request(`/v1/inquiries/${inquiry}/run`, admin, {})).status,
+      404,
+    );
+    const delegated = (
+      await request('/v1/auth/tool-token', reviewer, { inquiry_id: inquiry })
+    ).body.access_token;
+    assert.equal(
+      (await request(`/v1/inquiries/${inquiry}/run`, delegated, {})).status,
+      403,
+    );
+    assert.equal(
+      (
+        await request(`/v1/inquiries/${inquiry}/run`, reviewer, {
+          user_id: reviewerId,
+        })
+      ).status,
+      400,
+    );
+    assert.equal(modelCalls, 0);
+    const result = await request(`/v1/inquiries/${inquiry}/run`, reviewer, {});
+    assert.equal(result.status, 201, JSON.stringify(result.body));
+    assert.equal(result.body.status, 'ANSWERED');
+    assert.equal(result.body.model_calls, 3);
+    const stored = await request(`/v1/inquiries/${inquiry}`, reviewer);
+    assert.equal(stored.body.citations.length, 2);
+    const trace = await request(
+      `/v1/inquiries/${inquiry}/trace?limit=100`,
+      reviewer,
+    );
+    assert.ok(
+      trace.body.results.some(
+        (e) => e.event_type === 'AI_TOOL_STARTED' && e.tool_call_id,
+      ),
+    );
+    assert.ok(
+      trace.body.results.some((e) => e.event_type === 'AI_RUN_COMPLETED'),
+    );
+    assert.equal(
+      await db.session.count({
+        where: { userId: reviewerId, kind: 'AGENT', inquiryId: inquiry },
+      }),
+      1,
+      'Only the explicitly created external delegated token remains',
+    );
+    assert.equal(
+      (await request(`/v1/inquiries/${inquiry}/run`, reviewer, {})).status,
+      409,
+    );
+    assert.equal(modelCalls, 3);
+    await db.permission.deleteMany({
+      where: { sourceId: secondary.source_id },
+    });
+    assert.equal(
+      (await request(`/v1/inquiries/${inquiry}`, reviewer)).status,
+      404,
+      'Even context omitted from the final citation list is reauthorized',
+    );
+  } finally {
+    provider.create = original;
+  }
+});
+
+test('HF quota failure leaves the inquiry pending, releases the session and returns a safe error', async () => {
+  const { HuggingFaceProvider } = require('../dist/agent/huggingface.provider');
+  const { AgentError } = require('@veridict/agent');
+  const provider = app.get(HuggingFaceProvider);
+  const original = provider.create;
+  const inquiry = (
+    await request('/v1/inquiries', reviewer, {
+      question: 'Synthetic quota check',
+    })
+  ).body.inquiry_id;
+  provider.create = () => ({
+    modelId: 'test/synthetic',
+    model: {
+      complete: async () => {
+        throw new AgentError('AI_QUOTA_EXHAUSTED');
+      },
+    },
+  });
+  try {
+    const result = await request(`/v1/inquiries/${inquiry}/run`, reviewer, {});
+    assert.equal(result.status, 503);
+    assert.equal(result.body.error, 'AI_QUOTA_EXHAUSTED');
+    assert.equal(
+      (await request(`/v1/inquiries/${inquiry}`, reviewer)).body.status,
+      'PENDING',
+    );
+    assert.equal(
+      await db.session.count({
+        where: { userId: reviewerId, kind: 'AGENT', inquiryId: inquiry },
+      }),
+      0,
+    );
+  } finally {
+    provider.create = original;
+  }
+});
+
+test('HF completion rechecks ACL after a model response and never stores a revoked answer', async () => {
+  const { HuggingFaceProvider } = require('../dist/agent/huggingface.provider');
+  const provider = app.get(HuggingFaceProvider);
+  const original = provider.create;
+  const source = await ingest({
+    type: 'DOCUMENT',
+    title: 'HF revocation fixture',
+    content: 'hfrevocation The amount is Rp750000.',
+    permissions: [{ subject_type: 'ORGANIZATION', subject_id: orgId }],
+  });
+  const inquiry = (
+    await request('/v1/inquiries', reviewer, {
+      question: 'Berapa jumlah hfrevocation?',
+    })
+  ).body.inquiry_id;
+  let calls = 0;
+  provider.create = () => ({
+    modelId: 'test/synthetic',
+    model: {
+      complete: async () => {
+        calls++;
+        if (calls === 1)
+          return hfTool('search_authorized_knowledge', {
+            query: 'hfrevocation',
+          });
+        await db.permission.deleteMany({
+          where: { sourceId: source.source_id },
+        });
+        return hfTool('complete_inquiry', {
+          status: 'ANSWERED',
+          answer: 'Rp750000',
+          citations: [
+            {
+              source_id: source.source_id,
+              chunk_id: source.chunks[0].chunk_id,
+            },
+          ],
+        });
+      },
+    },
+  });
+  try {
+    assert.equal(
+      (await request(`/v1/inquiries/${inquiry}/run`, reviewer, {})).status,
+      404,
+    );
+    const row = await db.inquiry.findUniqueOrThrow({ where: { id: inquiry } });
+    assert.equal(row.status, 'PENDING');
+    assert.equal(row.answer, null);
+    assert.equal(calls, 2);
+    assert.equal(
+      await db.session.count({
+        where: { userId: reviewerId, kind: 'AGENT', inquiryId: inquiry },
+      }),
+      0,
+    );
+  } finally {
+    provider.create = original;
+  }
+});

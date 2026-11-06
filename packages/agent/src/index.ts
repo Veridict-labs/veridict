@@ -3,6 +3,10 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { searchInput } from '@veridict/contracts';
 import { createHash } from 'node:crypto';
 
+export * from './model';
+export * from './huggingface';
+export * from './grounded-agent';
+
 export const requiredTools = [
   'search_authorized_knowledge',
   'resolve_policy_claims',

@@ -225,7 +225,12 @@ export class InquiriesService {
       };
     });
   }
-  answer(actor: Actor, inquiryId: string, input: AnswerInput) {
+  answer(
+    actor: Actor,
+    inquiryId: string,
+    input: AnswerInput,
+    contextEvidence: { source_id: string; chunk_id: string }[] = [],
+  ) {
     actor = this.security.forInquiry(actor, inquiryId);
     if (actor.sessionKind !== 'AGENT')
       throw new ForbiddenException('A delegated agent session is required');
@@ -234,6 +239,9 @@ export class InquiriesService {
       if (!['PENDING', 'NEEDS_REVALIDATION'].includes(inquiry.status))
         throw new ConflictException('Inquiry already completed');
       const citations = [
+        // Internal runtime ledger: all model-exposed chunks participate in revocation,
+        // even when a draft omits a citation or the grounding check abstains.
+        ...contextEvidence,
         ...input.citations,
         ...(input.official_truth?.evidence ?? []),
         ...(input.operational_truth?.evidence ?? []),

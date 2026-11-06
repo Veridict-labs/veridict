@@ -102,4 +102,12 @@ export class AuthService {
       return { revoked: true };
     });
   }
+
+  async releaseToolSession(actor: Actor) {
+    if (actor.sessionKind !== 'AGENT') throw new UnauthorizedException();
+    // Idempotent cleanup even after user deactivation or token expiry.
+    await this.db.session.deleteMany({
+      where: { id: actor.sessionId, userId: actor.id, kind: 'AGENT' },
+    });
+  }
 }
