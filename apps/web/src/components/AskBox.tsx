@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { SUGGESTED_QUESTIONS } from '@/lib/demo-data';
 import { useSession } from '@/lib/session';
+import type { ProcessingMode } from '@/lib/types';
 import { Icon } from './Icon';
 
 export const RUN_FLAG = (id: string) => `vd-run-${id}`;
@@ -12,16 +13,17 @@ export function AskBox({ autoFocus = false }: { autoFocus?: boolean }) {
   const { client } = useSession();
   const router = useRouter();
   const [question, setQuestion] = useState('');
+  const [processingMode, setProcessingMode] = useState<ProcessingMode>('ai');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const ask = async (q: string) => {
     const text = q.trim();
-    if (!text || !client) return;
+    if (!text || !client || busy) return;
     setBusy(true);
     setError(null);
     try {
-      const id = await client.ask(text);
+      const id = await client.ask(text, undefined, processingMode);
       try {
         sessionStorage.setItem(RUN_FLAG(id), '1');
       } catch {}
@@ -43,6 +45,42 @@ export function AskBox({ autoFocus = false }: { autoFocus?: boolean }) {
         }}
         className="rounded-2xl border border-line-strong bg-surface p-2 shadow-card focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/20"
       >
+        {client?.mode === 'live' && (
+          <fieldset
+            disabled={busy}
+            className="border-b border-line px-3 pb-3 pt-2"
+          >
+            <legend className="sr-only">Answer mode</legend>
+            <div className="flex flex-wrap gap-3">
+              {(
+                [
+                  ['ai', 'AI on'],
+                  ['no_ai', 'AI off · Tanpa AI'],
+                ] as const
+              ).map(([value, label]) => (
+                <label
+                  key={value}
+                  className="inline-flex cursor-pointer items-center gap-2 text-sm font-semibold"
+                >
+                  <input
+                    type="radio"
+                    name="processing-mode"
+                    value={value}
+                    checked={processingMode === value}
+                    onChange={() => setProcessingMode(value)}
+                    className="accent-brand"
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-ink-3">
+              {processingMode === 'ai'
+                ? 'AI interprets your question and checks supporting evidence.'
+                : 'Keyword search with direct source excerpts and citations. No AI calls; no policy interpretation.'}
+            </p>
+          </fieldset>
+        )}
         <label htmlFor="vd-question" className="sr-only">
           Your question
         </label>

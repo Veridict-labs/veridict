@@ -213,6 +213,7 @@ model Inquiry {
   askerId           String @db.Uuid
   asker             User @relation(fields: [askerId], references: [id])
   question          String
+  processingMode    String @default("ai")
   status            InquiryStatus @default(PENDING)
   answer            String?
   structuredAnswer  Json?

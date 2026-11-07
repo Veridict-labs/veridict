@@ -34,6 +34,7 @@ import { EscalationsService } from '../escalations/escalations.service';
 import { AuditService, digest } from '../audit/audit.service';
 import { ModelProvider } from './model.provider';
 import { Clock } from '../common/clock';
+import { noAiAnswer, noAiQuery } from './no-ai';
 
 @Injectable()
 export class AgentService {
@@ -63,8 +64,10 @@ export class AgentService {
       });
     this.active.add(runKey);
     let agent: Actor | undefined;
+    let withoutAi = false;
     try {
       const inquiry = await this.inquiries.get(user, inquiryId);
+      withoutAi = inquiry.processing_mode === 'no_ai';
       if (!['PENDING', 'NEEDS_REVALIDATION'].includes(inquiry.status))
         throw new ConflictException('Inquiry already completed');
       if (inquiry.personal_data_request)
@@ -72,10 +75,12 @@ export class AgentService {
           { ...user, toolCallId: randomUUID() },
           inquiryId,
         );
-      const { provider, model, modelId } = this.provider.create();
       const session = await this.auth.issueToolToken(user, inquiryId);
       agent = await this.auth.authenticate(session.access_token);
       const actor = agent;
+      if (withoutAi)
+        return await this.runWithoutAi(actor, inquiryId, inquiry.question);
+      const { provider, model, modelId } = this.provider.create();
       await this.security.scope(actor, false, (tx) =>
         this.audit.record(tx, actor, 'AI_RUN_STARTED', [], 'STARTED', {
           provider,
@@ -170,7 +175,7 @@ export class AgentService {
             this.audit.record(
               tx,
               agent!,
-              'AI_RUN_FAILED',
+              withoutAi ? 'NO_AI_RUN_FAILED' : 'AI_RUN_FAILED',
               [inquiryId],
               'FAILED',
               {
@@ -198,6 +203,43 @@ export class AgentService {
         });
       this.active.delete(runKey);
     }
+  }
+
+  private async runWithoutAi(actor: Actor, inquiryId: string, question: string) {
+    await this.security.scope(actor, false, (tx) =>
+      this.audit.record(tx, actor, 'NO_AI_RUN_STARTED', [inquiryId], 'STARTED', {
+        model_calls: 0,
+      }),
+    );
+    const query = noAiQuery(question);
+    const search = query
+      ? await this.knowledge.search(
+          { ...actor, toolCallId: randomUUID() },
+          { query, limit: 5 },
+        )
+      : { results: [] };
+    await this.reauthorize(actor, search.results);
+    const completed = await this.inquiries.answer(
+      actor,
+      inquiryId,
+      noAiAnswer(question, search.results),
+      search.results,
+    );
+    await this.security
+      .scope(actor, false, (tx) =>
+        this.audit.record(
+          tx, actor, 'NO_AI_RUN_COMPLETED', [inquiryId], completed.status,
+          { model_calls: 0, result_count: search.results.length, retrieval: 'LEXICAL' },
+        ),
+      )
+      .catch(() => this.logger.error('Could not record source search completion summary'));
+    return {
+      ...completed,
+      processing_mode: 'no_ai',
+      provider: null,
+      model: null,
+      model_calls: 0,
+    };
   }
 
   private reauthorize(

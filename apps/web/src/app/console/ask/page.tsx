@@ -6,7 +6,7 @@ import { Icon } from '@/components/Icon';
 const TIPS = [
   {
     icon: 'scale' as const,
-    text: 'If two sources disagree, Veridict tells you which one applies and why.',
+    text: 'AI mode checks which rule applies. AI off returns source excerpts for you to compare.',
   },
   {
     icon: 'lock' as const,
@@ -14,7 +14,7 @@ const TIPS = [
   },
   {
     icon: 'alert' as const,
-    text: 'When the evidence isn’t there, it says so and points you to the right owner.',
+    text: 'When evidence is missing, Veridict says so. Try more specific keywords in AI-off mode.',
   },
 ];
 

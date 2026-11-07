@@ -7,6 +7,7 @@ import type {
   Me,
   PendingFeedback,
   PersonalDataRequest,
+  ProcessingMode,
   TraceEvent,
 } from './types';
 
@@ -30,8 +31,8 @@ export interface VeridictClient {
   me(): Promise<Me>;
   listInquiries(): Promise<InquirySummary[]>;
   getInquiry(id: string): Promise<Inquiry>;
-  /** Creates an inquiry and asks the agent to process it. Returns the inquiry id. */
-  ask(question: string, personalDataRequest?: PersonalDataRequest): Promise<string>;
+  /** Saves an inquiry; the detail page starts processing in its selected mode. */
+  ask(question: string, personalDataRequest?: PersonalDataRequest, processingMode?: ProcessingMode): Promise<string>;
   run(id: string): Promise<void>;
   trace(id: string): Promise<TraceEvent[]>;
   evidence(sourceId: string, chunkId: string): Promise<Evidence>;
@@ -110,11 +111,12 @@ export function liveClient(token: string): VeridictClient {
       return page.results;
     },
     getInquiry: (id) => call<Inquiry>(`/v1/inquiries/${id}`),
-    async ask(question, personalDataRequest) {
+    async ask(question, personalDataRequest, processingMode = 'ai') {
       const created = await call<{ inquiry_id: string }>('/v1/inquiries', {
         method: 'POST',
         body: {
           question,
+          processing_mode: processingMode,
           ...(personalDataRequest ? { personal_data_request: personalDataRequest } : {}),
         },
       });
@@ -211,7 +213,7 @@ export function demoClient(): VeridictClient {
         };
       return structuredClone(found);
     },
-    async ask(question) {
+    async ask(question, _personalDataRequest, processingMode = 'ai') {
       const template = inquiries.get(pick(question))!;
       const id = `demo-new-${++counter}`;
       const now = new Date().toISOString();
@@ -219,6 +221,7 @@ export function demoClient(): VeridictClient {
         ...structuredClone(template),
         inquiry_id: id,
         question,
+        processing_mode: processingMode,
         created_at: now,
         updated_at: now,
       });

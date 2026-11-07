@@ -121,6 +121,12 @@ export default function InquiryPage() {
       <header className="mt-4">
         <div className="flex flex-wrap items-center gap-2">
           <StatusBadge status={status} />
+          {client?.mode === 'demo' ? (
+            <Pill tone="neutral">Demo · Synthetic answers</Pill>
+          ) : (
+            <Pill tone="neutral">{inquiry.personal_data_request ? 'Authorized data · No AI'
+              : inquiry.processing_mode === 'no_ai' ? 'AI off · Source excerpts' : 'AI on'}</Pill>
+          )}
           <span className="text-sm text-ink-3">
             Asked {formatDate(inquiry.created_at, true)}
           </span>
@@ -350,11 +356,13 @@ function steps(i: Inquiry, running: boolean): Step[] {
       label: 'Rule check',
       detail: i.conflicts.length
         ? `${i.conflicts.length} conflict resolved`
-        : answered
-          ? 'No conflict'
-          : 'Skipped',
+        : i.processing_mode === 'no_ai' && !i.personal_data_request
+          ? 'Not evaluated · AI off'
+          : answered
+            ? 'No conflict'
+            : 'Skipped',
       icon: 'scale',
-      state: answered ? 'done' : 'skipped',
+      state: answered && i.processing_mode !== 'no_ai' ? 'done' : 'skipped',
     },
     {
       label: 'Answer',
@@ -362,7 +370,9 @@ function steps(i: Inquiry, running: boolean): Step[] {
         i.status === 'NEEDS_REVALIDATION'
           ? 'Out of date'
           : answered
-            ? 'Every claim cited'
+            ? i.processing_mode === 'no_ai'
+              ? 'Source excerpts cited'
+              : 'Every claim cited'
             : i.status === 'NEEDS_CLARIFICATION'
               ? 'Needs detail'
               : 'Abstained safely',
@@ -389,7 +399,7 @@ function Outcome({
   const { client } = useSession();
   const askAgain = async () => {
     if (!client) return;
-    const id = await client.ask(inquiry.question, inquiry.personal_data_request ?? undefined);
+    const id = await client.ask(inquiry.question, inquiry.personal_data_request ?? undefined, inquiry.processing_mode);
     try {
       sessionStorage.setItem(RUN_FLAG(id), '1');
     } catch {}
@@ -400,8 +410,9 @@ function Outcome({
     return (
       <Card tone="info" icon="clock" title="Veridict is working on it">
         <p className="text-ink-2">
-          Searching only the sources you can access, then checking which rule
-          applies. Nothing is shown until every claim is matched to a citation.
+          {inquiry.processing_mode === 'no_ai'
+            ? 'Searching sources you can access by keyword, then returning cited excerpts without AI.'
+            : 'Searching only the sources you can access, then checking which rule applies. Nothing is shown until every claim is matched to a citation.'}
         </p>
         {!inquiry.answer && (
           <Button variant="outline" className="mt-4" onClick={onRun}>
@@ -422,7 +433,7 @@ function Outcome({
           </span>
           <div className="min-w-0">
             <p className="font-semibold text-ok">
-              Answer supported by {plural(inquiry.citations.length, 'source')}
+              {inquiry.processing_mode === 'no_ai' ? 'Excerpts from' : 'Answer supported by'} {plural(inquiry.citations.length, 'source')}
             </p>
             {headline && (
               <p className="mt-1 text-2xl font-bold leading-snug tracking-tight sm:text-3xl">
@@ -431,7 +442,7 @@ function Outcome({
             )}
             <p
               className={cx(
-                'leading-relaxed',
+                'whitespace-pre-wrap leading-relaxed',
                 headline ? 'mt-3 text-ink-2' : 'mt-2 text-xl',
               )}
             >
@@ -446,15 +457,19 @@ function Outcome({
         </div>
         <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-line pt-4 text-xs text-ink-3">
           <span className="inline-flex items-center gap-1">
-            <Icon name="shield" size={13} /> Rules and source metadata chose the
-            applicable source
+            <Icon name="shield" size={13} />
+            {inquiry.processing_mode === 'no_ai'
+              ? 'Keyword matches from sources you can access'
+              : 'Rules and source metadata chose the applicable source'}
           </span>
           <span className="inline-flex items-center gap-1">
-            <Icon name="spark" size={13} /> AI wrote the wording; each claim was
-            checked against citations
+            <Icon name="spark" size={13} />
+            {inquiry.processing_mode === 'no_ai' || inquiry.personal_data_request
+              ? 'No AI calls; text returned directly from authorized sources'
+              : 'AI wrote the wording; each claim was checked against citations'}
           </span>
           <span>
-            Evidence: <strong className="text-ink-2">Supported</strong>
+            Evidence: <strong className="text-ink-2">{inquiry.processing_mode === 'no_ai' ? 'Source excerpts' : 'Supported'}</strong>
           </span>
         </div>
       </section>
