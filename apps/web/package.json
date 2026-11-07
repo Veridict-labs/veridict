@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --port 3000",
+    "prebuild": "npm run build -w @veridict/contracts",
     "build": "next build",
     "start": "next start --port 3000",
     "lint": "eslint .",
