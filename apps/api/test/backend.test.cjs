@@ -1780,6 +1780,143 @@ test('shared demo fixtures seed reproducible policies, permissions and privacy s
   );
 });
 
+async function policyFixture(domain, predicate = {}) {
+  const me = (await request('/v1/auth/me', admin)).body;
+  const source = await ingest({
+    type: 'DOCUMENT', title: domain, state: 'APPROVED', issuer_id: me.id,
+    content: `${domain} Benefit Rp750000. Alternative Rp990000. Manager approval. Director approval.`,
+    permissions: [{ subject_type: 'ORGANIZATION', subject_id: orgId }],
+  });
+  const input = { evidence_chunk_id: source.chunks[0].chunk_id, domain, predicate,
+    result: 'Rp750000', authority: 'HR', valid_from: '2020-01-01T00:00:00Z' };
+  const created = await request('/v1/policies', admin, input);
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+  return { source, input, claim: created.body.claim_id };
+}
+
+async function runPolicyFixture(fixture, beforeVerdict, scope) {
+  const { ModelProvider } = require('../dist/agent/model.provider');
+  const provider = app.get(ModelProvider), original = provider.create;
+  provider.create = () => {
+    let calls = 0;
+    return { provider: 'gemini', modelId: 'test/synthetic-policy', model: { complete: async () => {
+      calls++;
+      if (calls === 1) return hfTool('search_authorized_knowledge', { query: fixture.input.domain });
+      if (scope && calls === 2) return hfTool('resolve_policy_claims', { domain: fixture.input.domain, context: {}, ...scope });
+      if (calls === (scope ? 3 : 2)) return hfTool('complete_inquiry', {
+        status: 'ANSWERED', answer: 'The wrong allowance is Rp500000.',
+        citations: [{ source_id: fixture.source.source_id, chunk_id: fixture.source.chunks[0].chunk_id }],
+      });
+      if (beforeVerdict) await beforeVerdict();
+      return { role: 'assistant', content: '{"supported":true,"reason_code":"SUPPORTED"}' };
+    } } };
+  };
+  try {
+    const created = await request('/v1/inquiries', reviewer, { question: `Berapa tunjangan ${fixture.input.domain}${scope?.as_of ? ` per ${scope.as_of}` : ''}?` });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    const id = created.body.inquiry_id;
+    return { id, result: await request(`/v1/inquiries/${id}/run`, reviewer, {}) };
+  } finally { provider.create = original; }
+}
+
+test('policy hints are ACL-scoped, and the runtime cannot override a validated amount', async () => {
+  const fixture = await policyFixture('policyproofalpha');
+  const target = `/v1/sources/${fixture.source.source_id}/evidence?chunk_id=${fixture.source.chunks[0].chunk_id}`;
+  assert.deepEqual((await request(target, reviewer)).body.policy_domains, ['policyproofalpha']);
+  assert.equal((await request(target, outsider)).status, 404);
+  assert.deepEqual((await request('/v1/knowledge/search', outsider, { query: 'policyproofalpha' })).body.results, []);
+  const { id, result } = await runPolicyFixture(fixture);
+  assert.equal(result.status, 201, JSON.stringify(result.body));
+  const opened = (await request(`/v1/inquiries/${id}`, reviewer)).body;
+  assert.equal(opened.status, 'ANSWERED');
+  assert.match(opened.answer, /^Aturan resmi: Rp750000/);
+  assert.doesNotMatch(opened.answer, /Rp500000/);
+  assert.doesNotMatch(JSON.stringify(opened), /_policy_checks/);
+  const trace = (await request(`/v1/inquiries/${id}/trace?limit=100`, reviewer)).body.results;
+  assert.ok(trace.some((e) => e.event_type === 'POLICY_RESOLVED'));
+  assert.ok(trace.some((e) => e.event_type === 'AI_RUN_COMPLETED' && e.metadata.grounding_reason === 'SUPPORTED' && e.metadata.policy_checks === 1));
+  const changed = await request('/v1/policies', admin, { ...fixture.input, result: 'Rp990000' });
+  assert.equal(changed.status, 201, JSON.stringify(changed.body));
+  const stale = (await request(`/v1/inquiries/${id}`, reviewer)).body;
+  assert.equal(stale.status, 'NEEDS_REVALIDATION');
+  assert.equal(stale.answer, null);
+  assert.deepEqual(stale.citations, []);
+  const rerun = await runPolicyFixture(fixture);
+  assert.equal(rerun.result.status, 201, JSON.stringify(rerun.result.body));
+  assert.equal(rerun.result.body.status, 'INSUFFICIENT_EVIDENCE');
+});
+
+test('a policy changed during support verification cannot be persisted', async () => {
+  const fixture = await policyFixture('policyproofbeta');
+  const { id, result } = await runPolicyFixture(fixture, async () => {
+    const changed = await request('/v1/policies', admin, { ...fixture.input, result: 'Rp990000' });
+    assert.equal(changed.status, 201);
+  });
+  assert.equal(result.status, 409, JSON.stringify(result.body));
+  const row = await db.inquiry.findUniqueOrThrow({ where: { id } });
+  assert.equal(row.status, 'PENDING');
+  assert.equal(row.answer, null);
+  assert.equal(row.structuredAnswer, null);
+  assert.equal(await db.session.count({ where: { userId: reviewerId, inquiryId: id, kind: 'AGENT' } }), 0);
+});
+
+test('partial and wrongly typed context cannot fall back to a less specific policy', async () => {
+  const fixture = await policyFixture('policyproofcontext');
+  const specific = await request('/v1/policies', admin, {
+    ...fixture.input, predicate: { amount_min: 100, amount_max: 200, type: 'saas' },
+    result: 'Director approval', authority: 'Director', supersedes_id: fixture.claim,
+  });
+  assert.equal(specific.status, 201, JSON.stringify(specific.body));
+  for (const [context, status, missing] of [
+    [{}, 'NEEDS_CLARIFICATION', ['amount', 'type']],
+    [{ amount: 150 }, 'NEEDS_CLARIFICATION', ['type']],
+    [{ amount: '150', type: 'saas' }, 'NEEDS_CLARIFICATION', ['amount']],
+    [{ amount: 100, type: 'saas' }, 'SUPPORTED', []],
+    [{ amount: 200, type: 'saas' }, 'SUPPORTED', []],
+    [{ amount: 99, type: 'saas' }, 'SUPPORTED', []],
+    [{ amount: 201, type: 'saas' }, 'SUPPORTED', []],
+  ]) {
+    const r = await request('/v1/policies/resolve', reviewer, { domain: fixture.input.domain, context });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    assert.equal(r.body.status, status, JSON.stringify(context));
+    assert.deepEqual(r.body.required_context, missing);
+    if (status === 'SUPPORTED') assert.equal(r.body.applicable[0].authority, context.amount >= 100 && context.amount <= 200 ? 'Director' : 'HR');
+  }
+  const run = await runPolicyFixture(fixture);
+  assert.equal(run.result.body.status, 'NEEDS_CLARIFICATION');
+});
+
+test('historical snapshot stays historical and future-effective claim changes stale a current answer', async () => {
+  const fixture = await policyFixture('policyprooftemporal');
+  const future = await request('/v1/policies', admin, {
+    ...fixture.input, result: 'Rp990000', valid_from: '2099-01-01T00:00:00Z', supersedes_id: fixture.claim,
+  });
+  assert.equal(future.status, 201);
+  const { id, result } = await runPolicyFixture(fixture);
+  assert.equal(result.status, 201, JSON.stringify(result.body));
+  assert.equal((await request(`/v1/inquiries/${id}`, reviewer)).body.status, 'ANSWERED');
+  const historical = await runPolicyFixture(fixture, undefined, { as_of: '2020-06-01T00:00:00Z' });
+  assert.equal(historical.result.status, 201, JSON.stringify(historical.result.body));
+  const { Clock } = require('../dist/common/clock');
+  const clock = app.get(Clock), actualNow = clock.now;
+  try {
+    clock.now = () => new Date('2099-01-01T00:00:00Z');
+    assert.equal((await request(`/v1/inquiries/${id}`, reviewer)).body.status, 'NEEDS_REVALIDATION');
+    const pinned = (await request(`/v1/inquiries/${historical.id}`, reviewer)).body;
+    assert.equal(pinned.status, 'ANSWERED');
+    assert.match(pinned.answer, /Rp750000/);
+  } finally { clock.now = actualNow; }
+});
+
+test('policy evidence revocation during verification aborts the complete pipeline', async () => {
+  const fixture = await policyFixture('policyproofrevocation');
+  const { id, result } = await runPolicyFixture(fixture, async () => {
+    await request(`/v1/sources/${fixture.source.source_id}/permissions`, admin, { permissions: [] }, 'PUT');
+  });
+  assert.ok([404, 409].includes(result.status), JSON.stringify(result.body));
+  assert.equal((await db.inquiry.findUniqueOrThrow({ where: { id } })).answer, null);
+});
+
 test('history titles are redacted on the server and removed after READ revocation', async () => {
   const value = 'Synthetic Private Employee';
   const source = await ingest({
@@ -1970,7 +2107,9 @@ test('future-effective source replacement invalidates an existing answer when it
     ).status,
     201,
   );
-  const effectiveAt = Date.now() + 1500;
+  const { Clock } = require('../dist/common/clock');
+  const clock = app.get(Clock), actualNow = clock.now;
+  const effectiveAt = actualNow().getTime() + 60000;
   await ingest({
     type: 'DOCUMENT',
     title: 'Scheduled replacement',
@@ -1981,14 +2120,16 @@ test('future-effective source replacement invalidates an existing answer when it
     supersedes_id: source.source_id,
     valid_from: new Date(effectiveAt).toISOString(),
   });
-  const before = await request(`/v1/inquiries/${key}`, reviewer);
-  if (Date.now() < effectiveAt) assert.equal(before.body.status, 'ANSWERED');
-  await new Promise((resolve) =>
-    setTimeout(resolve, Math.max(0, effectiveAt - Date.now()) + 30),
-  );
-  const stale = await request(`/v1/inquiries/${key}`, reviewer);
-  assert.equal(stale.body.status, 'NEEDS_REVALIDATION');
-  assert.equal(stale.body.answer, null);
+  try {
+    clock.now = () => new Date(effectiveAt - 1);
+    assert.equal((await request(`/v1/inquiries/${key}`, reviewer)).body.status, 'ANSWERED');
+    clock.now = () => new Date(effectiveAt);
+    const stale = await request(`/v1/inquiries/${key}`, reviewer);
+    assert.equal(stale.body.status, 'NEEDS_REVALIDATION');
+    assert.equal(stale.body.answer, null);
+    clock.now = () => new Date(effectiveAt + 1);
+    assert.equal((await request(`/v1/inquiries/${key}`, reviewer)).body.status, 'NEEDS_REVALIDATION');
+  } finally { clock.now = actualNow; }
 });
 
 test('bootstrap CLI creates an administrator once and rejects a duplicate organization', async () => {

@@ -195,7 +195,7 @@ test('unresolved formal rules cannot become an ANSWERED winner', async () => {
   ]);
   const run = setup(model, {
     status: 'NEEDS_REVIEW',
-    applicable: [{ evidence: e }],
+    applicable: [{ evidence: e, result: 'Conflicting formal rules.', authority: 'HR' }],
   });
   const result = await runGroundedAgent(run.input);
   assert.equal(result.answer.status, 'INSUFFICIENT_EVIDENCE');

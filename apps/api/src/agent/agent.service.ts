@@ -33,6 +33,7 @@ import { PolicyService } from '../policy/policy.service';
 import { EscalationsService } from '../escalations/escalations.service';
 import { AuditService, digest } from '../audit/audit.service';
 import { ModelProvider } from './model.provider';
+import { Clock } from '../common/clock';
 
 @Injectable()
 export class AgentService {
@@ -47,6 +48,7 @@ export class AgentService {
     private readonly policy: PolicyService,
     private readonly escalations: EscalationsService,
     private readonly audit: AuditService,
+    private readonly clock: Clock,
   ) {}
 
   async run(user: Actor, inquiryId: string) {
@@ -83,6 +85,7 @@ export class AgentService {
       const result = await runGroundedAgent({
         model,
         question: inquiry.question,
+        referenceTime: this.clock.now().toISOString(),
         execute: async (name, args) => {
           const invocation = { ...actor, toolCallId: randomUUID() };
           await this.security.scope(invocation, false, (tx) =>
@@ -132,6 +135,7 @@ export class AgentService {
         inquiryId,
         result.answer,
         result.observedEvidence,
+        result.policyChecks,
       );
       await this.security
         .scope(actor, false, (tx) =>
@@ -145,6 +149,8 @@ export class AgentService {
               provider,
               model: modelId,
               model_calls: result.modelCalls,
+              grounding_reason: result.groundingReason,
+              policy_checks: result.policyChecks.length,
             },
           ),
         )
@@ -196,7 +202,7 @@ export class AgentService {
 
   private reauthorize(
     actor: Actor,
-    citations: (Citation & { excerpt?: string })[],
+    citations: (Citation & { excerpt?: string; policy_domains?: string[] })[],
   ) {
     return this.security.scope(actor, false, async (tx) => {
       const chunks = await this.security.chunks(
@@ -212,7 +218,9 @@ export class AgentService {
         if (
           !chunk ||
           (citation.excerpt !== undefined &&
-            evidence(chunk).excerpt !== citation.excerpt)
+            evidence(chunk).excerpt !== citation.excerpt) ||
+          (citation.policy_domains !== undefined &&
+            JSON.stringify(evidence(chunk).policy_domains) !== JSON.stringify(citation.policy_domains))
         )
           throw new NotFoundException();
       }

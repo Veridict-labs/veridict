@@ -13,6 +13,17 @@ import { answerInput, personalDataRequest } from '@veridict/contracts';
 import type { Prisma } from '../generated/prisma/client';
 import { EscalationsService } from '../escalations/escalations.service';
 import { PersonalDataService } from '../personal-data/personal-data.service';
+import { PolicyService } from '../policy/policy.service';
+import { policyCheckSchema, type PolicyCheck } from '@veridict/agent';
+import { z } from 'zod';
+import { Clock } from '../common/clock';
+
+function storedAnswer(value: unknown) {
+  const { _policy_checks, ...answer } = z.object({
+    _policy_checks: z.array(policyCheckSchema).max(12).default([]),
+  }).passthrough().parse(value);
+  return { answer: answerInput.parse(answer), checks: _policy_checks };
+}
 
 @Injectable()
 export class InquiriesService {
@@ -21,6 +32,8 @@ export class InquiriesService {
     private readonly audit: AuditService,
     private readonly escalations: EscalationsService,
     private readonly personalData: PersonalDataService,
+    private readonly policy: PolicyService,
+    private readonly clock: Clock,
   ) {}
   async visible(
     tx: Prisma.TransactionClient,
@@ -60,13 +73,15 @@ export class InquiriesService {
       },
     });
     if (!inquiry) throw new NotFoundException();
+    const checks = inquiry.structuredAnswer ? storedAnswer(inquiry.structuredAnswer).checks : [];
     if (
+      !(await this.policy.snapshotsMatchIn(tx, actor, checks)) ||
       inquiry.evidence.some((e) => {
         const replacement = e.chunk.source.supersededBy;
         return (
           replacement?.state === 'APPROVED' &&
           replacement.validFrom &&
-          replacement.validFrom <= new Date() &&
+          replacement.validFrom <= this.clock.now() &&
           (replacement.validFrom > inquiry.updatedAt ||
             replacement.recordedAt > inquiry.updatedAt)
         );
@@ -155,7 +170,7 @@ export class InquiriesService {
           },
         );
       const structured = inquiry.structuredAnswer
-        ? answerInput.parse(inquiry.structuredAnswer)
+        ? storedAnswer(inquiry.structuredAnswer).answer
         : null;
       const request = personalDataRequest.safeParse(inquiry.personalDataRequest);
       const safeStatement = (value: AnswerInput['official_truth']) =>
@@ -302,6 +317,7 @@ export class InquiriesService {
     inquiryId: string,
     input: AnswerInput,
     contextEvidence: { source_id: string; chunk_id: string }[] = [],
+    policyChecks: PolicyCheck[] = [],
   ) {
     actor = this.security.forInquiry(actor, inquiryId);
     if (actor.sessionKind !== 'AGENT')
@@ -310,6 +326,8 @@ export class InquiriesService {
       const inquiry = await this.visible(tx, actor, inquiryId);
       if (!['PENDING', 'NEEDS_REVALIDATION'].includes(inquiry.status))
         throw new ConflictException('Inquiry already completed');
+      if (!(await this.policy.snapshotsMatchIn(tx, actor, policyChecks)))
+        throw new ConflictException('Policy changed; rerun the inquiry');
       const citations = [
         // Internal runtime ledger: all model-exposed chunks participate in revocation,
         // even when a draft omits a citation or the grounding check abstains.
@@ -365,7 +383,7 @@ export class InquiriesService {
           assumptions: input.assumptions,
           limitations: input.limitations,
           permissionVersion: organization.permissionVersion,
-          structuredAnswer: input,
+          structuredAnswer: JSON.parse(JSON.stringify({ ...input, _policy_checks: policyChecks })) as Prisma.InputJsonValue,
           escalationDomain: input.escalation_domain ?? null,
           evidence: { create: chunks.map((c) => ({ chunkId: c.id })) },
         },

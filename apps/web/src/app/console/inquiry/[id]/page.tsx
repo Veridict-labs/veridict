@@ -157,7 +157,7 @@ export default function InquiryPage() {
         numbered={numbered}
       />
 
-      {status === 'ANSWERED' &&
+      {(status === 'ANSWERED' || status === 'INSUFFICIENT_EVIDENCE') &&
         (inquiry.official_truth ||
           inquiry.operational_truth ||
           inquiry.conflicts.length > 0) && (
@@ -292,7 +292,7 @@ export default function InquiryPage() {
         </section>
       )}
 
-      {status === 'ANSWERED' && <Feedback inquiry={inquiry} />}
+      {(status === 'ANSWERED' || status === 'INSUFFICIENT_EVIDENCE') && <Feedback inquiry={inquiry} />}
 
       <EvidenceDrawer
         key={open?.chunk_id ?? 'closed'}
