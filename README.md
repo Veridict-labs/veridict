@@ -1,8 +1,10 @@
 # Veridict
 
-A monorepo for Veridict. The NestJS backend implements organization-scoped authentication, permissions, ingestion, retrieval, policy resolution, inquiry history, reviewed feedback, audit logs, purpose-scoped personal-data disclosure, domain-owner routing, correlated inquiry traces, and an authenticated MCP endpoint. The Next.js frontend remains a starter for Person 3.
+A monorepo for Veridict. The NestJS backend implements organization-scoped authentication, permissions, ingestion, retrieval, policy resolution, inquiry history, reviewed feedback, audit logs, purpose-scoped personal-data disclosure, domain-owner routing, correlated inquiry traces, and an authenticated MCP endpoint. The Next.js frontend provides employee and reviewer consoles with connected and clearly labeled synthetic demo modes.
 
 Product specification: [Veridict PRD](Veridict_PRD_v1_Track_A.md).
+
+The hosted agent applies [deterministic policy gates and snapshot validation](docs/policy-orchestration.md) for curated policy evidence. Natural-language retrieval and semantic relevance still require model evaluation; see the documented limits and actual test results.
 
 The built-in Person 1 runtime uses Gemini by default (HF remains explicitly selectable). Create an inquiry, then call `POST /v1/inquiries/:id/run` as its owner to generate and persist an evidence-grounded answer. Configure backend-only `GEMINI_API_KEY` and `GEMINI_MODEL` in `apps/api/.env`; see the [Gemini setup and actual verification status](docs/gemini.md). WorkBuddy remains an optional MCP connector. A new inquiry stays pending until explicitly processed; no background queue is enabled.
 
