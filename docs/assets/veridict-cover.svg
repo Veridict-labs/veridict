@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="640" viewBox="0 0 1600 640" role="img" aria-labelledby="cover-title cover-description">
+  <title id="cover-title">Veridict — workplace answers, backed by policy and evidence</title>
+  <desc id="cover-description">A teal product illustration: approved documents, authorized chat updates and validated task precedents lead to an answer with an evidence trail. This is not an application screenshot.</desc>
+  <rect width="1600" height="640" rx="28" fill="#eaf3f0"/>
+  <circle cx="1480" cy="40" r="280" fill="#dcece7"/>
+  <circle cx="40" cy="640" r="210" fill="#e3f1ee"/>
+  <g font-family="Segoe UI, Arial, sans-serif">
+    <rect x="88" y="77" width="48" height="48" rx="13" fill="#0d6b63"/>
+    <path d="m101 100 9 12 15-24" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="153" y="107" font-size="16" font-weight="700" letter-spacing="2" fill="#0a524c">THE WORKPLACE BRAIN</text>
+    <text x="83" y="232" font-size="88" font-weight="750" letter-spacing="-3" fill="#16202e">Veridict</text>
+    <text x="88" y="311" font-size="43" font-weight="650" fill="#0a524c">Workplace answers.</text>
+    <text x="88" y="359" font-size="30" fill="#4a5566">Backed by policy and evidence.</text>
+    <g font-size="13" font-weight="700" letter-spacing="0.6" fill="#0a524c">
+      <rect x="88" y="411" width="178" height="38" rx="19" fill="#d4e8e1"/>
+      <text x="107" y="435">PERMISSION-AWARE</text>
+      <rect x="278" y="411" width="148" height="38" rx="19" fill="#d4e8e1"/>
+      <text x="298" y="435">SOURCE-CITED</text>
+      <rect x="438" y="411" width="122" height="38" rx="19" fill="#d4e8e1"/>
+      <text x="457" y="435">AUDITABLE</text>
+    </g>
+    <text x="88" y="534" font-size="19" fill="#4a5566">The formal rule. The observed practice. The evidence.</text>
+    <rect x="934" y="76" width="580" height="488" rx="28" fill="#f7fbf9" stroke="#d4e5de" stroke-width="2"/>
+    <path d="M952 155v326h18" fill="none" stroke="#a4c8bb" stroke-width="3" stroke-linecap="round"/>
+    <g fill="#fff" stroke="#d4e5de" stroke-width="2">
+      <rect x="970" y="108" width="510" height="92" rx="16"/>
+      <rect x="970" y="216" width="510" height="92" rx="16"/>
+      <rect x="970" y="324" width="510" height="92" rx="16"/>
+    </g>
+    <g fill="#e3f1ee">
+      <rect x="989" y="128" width="54" height="52" rx="12"/>
+      <rect x="989" y="236" width="54" height="52" rx="12"/>
+      <rect x="989" y="344" width="54" height="52" rx="12"/>
+    </g>
+    <g font-size="12" font-weight="750" fill="#0d6b63" text-anchor="middle">
+      <text x="1016" y="160">DOC</text>
+      <text x="1016" y="268">CHAT</text>
+      <text x="1016" y="376">TASK</text>
+    </g>
+    <g font-size="20" font-weight="650" fill="#16202e">
+      <text x="1063" y="147">Approved policy</text>
+      <text x="1063" y="255">Authorized update</text>
+      <text x="1063" y="363">Validated precedent</text>
+    </g>
+    <g font-size="16" fill="#4a5566">
+      <text x="1063" y="174">Authority, scope and effective dates</text>
+      <text x="1063" y="282">Compare versions and supersession</text>
+      <text x="1063" y="390">Observed practice stays nonbinding</text>
+    </g>
+    <rect x="970" y="442" width="510" height="94" rx="16" fill="#0d6b63"/>
+    <text x="995" y="480" font-size="23" font-weight="650" fill="#fff">Answer + evidence trail</text>
+    <text x="995" y="509" font-size="15" fill="#d8f0e8">Readable sources. Current permissions. Audit.</text>
+    <circle cx="1438" cy="489" r="22" fill="#d4e8e1"/>
+    <path d="m1427 489 8 8 14-17" fill="none" stroke="#0a524c" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M88 581h1424" stroke="#cadfd5" stroke-width="2"/>
+    <text x="88" y="609" font-size="13" fill="#60796e">Product illustration · Synthetic workplace scenarios · Challenge A</text>
+  </g>
+</svg>
