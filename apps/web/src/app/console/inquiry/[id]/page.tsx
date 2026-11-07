@@ -19,6 +19,7 @@ import {
   type Step,
 } from '@/components/ui';
 import { ApiError } from '@/lib/api';
+import { processingErrorMessage } from '@/lib/processing-error';
 import { useSession } from '@/lib/session';
 import type {
   Citation,
@@ -69,13 +70,7 @@ export default function InquiryPage() {
       await client.run(id);
     } catch (e) {
       if (active.current?.id !== id || active.current.client !== client) return;
-      setError(
-        e instanceof ApiError && e.status === 429
-          ? 'The AI provider is rate-limited right now. Try again in a minute.'
-          : e instanceof Error
-            ? e.message
-            : 'The agent could not finish.',
-      );
+      setError(processingErrorMessage(e));
     } finally {
       setRunningId((current) => current === id ? null : current);
       await load(true);
@@ -157,7 +152,7 @@ export default function InquiryPage() {
         numbered={numbered}
       />
 
-      {status === 'ANSWERED' &&
+      {(status === 'ANSWERED' || status === 'INSUFFICIENT_EVIDENCE') &&
         (inquiry.official_truth ||
           inquiry.operational_truth ||
           inquiry.conflicts.length > 0) && (

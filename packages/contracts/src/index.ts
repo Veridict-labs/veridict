@@ -149,7 +149,26 @@ export const policyInput = z
   .refine(
     (v) => !v.valid_until || v.valid_from < v.valid_until,
     'Invalid validity window',
-  );
+  )
+  .superRefine((v, ctx) => {
+    for (const [key, value] of Object.entries(v.predicate)) {
+      const range = key.endsWith('_min') || key.endsWith('_max');
+      const field = range ? key.slice(0, -4) : key;
+      if (!field.trim() || field.length > 80 || (range && typeof value !== 'number'))
+        ctx.addIssue({ code: 'custom', path: ['predicate', key], message: 'Invalid predicate field or numeric range' });
+      if (range && Object.hasOwn(v.predicate, field)) {
+        const exact = v.predicate[field];
+        if (typeof exact !== 'number' || typeof value !== 'number' ||
+            (key.endsWith('_min') ? exact < value : exact > value))
+          ctx.addIssue({ code: 'custom', path: ['predicate', key], message: 'Exact value contradicts numeric range' });
+      }
+      if (key.endsWith('_min')) {
+        const upper = v.predicate[`${field}_max`];
+        if (typeof value === 'number' && typeof upper === 'number' && value > upper)
+          ctx.addIssue({ code: 'custom', path: ['predicate', key], message: 'Minimum cannot exceed maximum' });
+      }
+    }
+  });
 export const contextSchema = z.record(
   z.string().max(80),
   z.union([z.string().max(200), z.number().finite(), z.boolean()]),
@@ -245,6 +264,7 @@ export type FeedbackInput = z.infer<typeof feedbackInput>;
 export type PermissionInput = z.infer<typeof permission>;
 export type InquiryInput = z.infer<typeof inquiryInput>;
 export type Evidence = {
+  policy_domains?: string[];
   source_id: string;
   chunk_id: string;
   title: string;

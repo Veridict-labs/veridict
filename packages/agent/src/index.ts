@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 export * from './model';
 export * from './huggingface';
 export * from './grounded-agent';
+export * from './policy-guard';
 
 export const requiredTools = [
   'search_authorized_knowledge',

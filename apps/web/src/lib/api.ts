@@ -18,6 +18,8 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    readonly code?: string,
+    readonly retryAfterSeconds?: number,
   ) {
     super(message);
   }
@@ -81,14 +83,20 @@ export function liveClient(token: string): VeridictClient {
     });
     if (!res.ok) {
       let message = `Request failed (${res.status})`;
+      let code: string | undefined;
       try {
-        const body = (await res.json()) as { message?: string | string[] };
+        const body = (await res.json()) as { message?: string | string[]; error?: unknown };
+        if (typeof body.error === 'string' && /^[A-Z_]{1,80}$/.test(body.error)) code = body.error;
         if (body.message)
           message = Array.isArray(body.message)
             ? body.message.join('; ')
             : body.message;
       } catch {}
-      throw new ApiError(res.status, message);
+      if (res.status === 429 && code !== 'AI_RATE_LIMITED') code = 'REQUEST_RATE_LIMITED';
+      const retry = res.headers.get('retry-after');
+      const seconds = retry && /^\d+$/.test(retry) ? Number(retry) : undefined;
+      throw new ApiError(res.status, message, code,
+        seconds !== undefined && Number.isSafeInteger(seconds) && seconds >= 0 && seconds <= 86400 ? seconds : undefined);
     }
     return (await res.json()) as T;
   };
