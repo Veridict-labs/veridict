@@ -1775,6 +1775,35 @@ test('shared demo fixtures seed reproducible policies, permissions and privacy s
   );
 });
 
+test('history titles are redacted on the server and removed after READ revocation', async () => {
+  const value = 'Synthetic Private Employee';
+  const source = await ingest({
+    type: 'DOCUMENT', title: 'Private name fixture', content: value,
+    personal_data_annotations: [{ field_type: 'NAME', start: 0, end: value.length }],
+    permissions: [{ subject_type: 'USER', subject_id: employeeId }],
+  });
+  const created = await request('/v1/inquiries', employee, {
+    question: `Tampilkan nama ${value}, email private@fixture.invalid`,
+    personal_data_request: {
+      source_id: source.source_id, chunk_id: source.chunks[0].chunk_id,
+      field_type: 'NAME', purpose: 'IDENTIFY_PERSON',
+    },
+  });
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+  const key = created.body.inquiry_id;
+  const list = await request('/v1/inquiries?limit=100', employee);
+  assert.equal(list.status, 200);
+  const row = list.body.results.find((r) => r.inquiry_id === key);
+  assert.ok(row, JSON.stringify(list.body));
+  assert.match(row.question, /REDACTED_NAME/);
+  assert.doesNotMatch(row.question, /Synthetic Private Employee|private@fixture.invalid/);
+  const opened = await request(`/v1/inquiries/${key}`, employee);
+  assert.equal(opened.body.question, row.question);
+  await db.permission.deleteMany({ where: { sourceId: source.source_id } });
+  assert.equal((await request(`/v1/inquiries/${key}`, employee)).status, 404);
+  assert.ok(!(await request('/v1/inquiries?limit=100', employee)).body.results.some((r) => r.inquiry_id === key));
+});
+
 test('last admin protection and deactivation revoke user and agent sessions immediately', async () => {
   const current = await request('/v1/auth/me', admin);
   assert.equal(

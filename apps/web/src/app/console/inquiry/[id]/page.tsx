@@ -19,7 +19,7 @@ import {
   type Step,
 } from '@/components/ui';
 import { ApiError } from '@/lib/api';
-import { questionCache, useSession } from '@/lib/session';
+import { useSession } from '@/lib/session';
 import type {
   Citation,
   FeedbackAction,
@@ -41,7 +41,6 @@ export default function InquiryPage() {
     if (!client) return;
     try {
       const next = await client.getInquiry(id);
-      questionCache.set(id, next.question);
       setInquiry(next);
     } catch (e) {
       setError(
@@ -384,7 +383,6 @@ function Outcome({
   const askAgain = async () => {
     if (!client) return;
     const id = await client.ask(inquiry.question);
-    questionCache.set(id, inquiry.question);
     try {
       sessionStorage.setItem(RUN_FLAG(id), '1');
     } catch {}

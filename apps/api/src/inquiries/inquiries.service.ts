@@ -7,7 +7,7 @@ import {
 import type { Actor } from '../auth/actor';
 import { SecurityService } from '../auth/security.service';
 import { AuditService, digest } from '../audit/audit.service';
-import { evidence, maskPII, maskUsingChunks } from '../knowledge/content';
+import { evidence, maskUsingChunks } from '../knowledge/content';
 import type { AnswerInput, InquiryInput } from '@veridict/contracts';
 import { answerInput } from '@veridict/contracts';
 import type { Prisma } from '../generated/prisma/client';
@@ -162,7 +162,7 @@ export class InquiriesService {
       await this.audit.record(tx, actor, 'INQUIRY_OPENED', [inquiry.id]);
       return {
         inquiry_id: inquiry.id,
-        question: maskPII(inquiry.question),
+        question: redact(inquiry.question),
         status: inquiry.status,
         escalation:
           !stale &&
@@ -213,11 +213,20 @@ export class InquiriesService {
         orderBy: { id: 'asc' },
         take: limit,
         ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-        select: { id: true, status: true, createdAt: true },
+        select: {
+          id: true,
+          status: true,
+          createdAt: true,
+          question: true,
+          evidence: {
+            select: { chunk: { select: { content: true, personalDataSpans: true } } },
+          },
+        },
       });
       return {
         results: rows.map((r) => ({
           inquiry_id: r.id,
+          question: maskUsingChunks(r.question, r.evidence.map((e) => e.chunk)),
           status: r.status,
           created_at: r.createdAt,
         })),

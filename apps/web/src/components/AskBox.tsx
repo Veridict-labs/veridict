@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { SUGGESTED_QUESTIONS } from '@/lib/demo-data';
-import { questionCache, useSession } from '@/lib/session';
+import { useSession } from '@/lib/session';
 import { Icon } from './Icon';
 
 export const RUN_FLAG = (id: string) => `vd-run-${id}`;
@@ -22,7 +22,6 @@ export function AskBox({ autoFocus = false }: { autoFocus?: boolean }) {
     setError(null);
     try {
       const id = await client.ask(text);
-      questionCache.set(id, text);
       try {
         sessionStorage.setItem(RUN_FLAG(id), '1');
       } catch {}
