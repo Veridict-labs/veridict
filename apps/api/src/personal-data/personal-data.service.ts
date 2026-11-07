@@ -14,6 +14,7 @@ import { AuditService, digest } from '../audit/audit.service';
 import { personalDataSpans, readPersonalDataSpans } from '../knowledge/content';
 import type { z } from 'zod';
 import { explicitlyRequests } from './personal-data.intent';
+import { Clock } from '../common/clock';
 
 export { explicitlyRequests } from './personal-data.intent';
 
@@ -25,6 +26,7 @@ export class PersonalDataService {
   constructor(
     private readonly security: SecurityService,
     private readonly audit: AuditService,
+    private readonly clock: Clock,
   ) {}
 
   async validateRequest(
@@ -131,7 +133,7 @@ export class PersonalDataService {
     if (
       replacement?.state === 'APPROVED' &&
       replacement.validFrom &&
-      replacement.validFrom <= new Date()
+      replacement.validFrom <= this.clock.now()
     )
       return null;
     const values = [

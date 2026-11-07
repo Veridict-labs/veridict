@@ -10,10 +10,12 @@ import type {
   ResolveInput,
 } from '@veridict/contracts';
 import { policyInput } from '@veridict/contracts';
+import { policyCheckSchema, policyFingerprint, policyResolution, type PolicyCheck } from '@veridict/agent';
 import { z } from 'zod';
 import type { Actor } from '../auth/actor';
 import { SecurityService } from '../auth/security.service';
 import { AuditService } from '../audit/audit.service';
+import { Clock } from '../common/clock';
 import type { Prisma } from '../generated/prisma/client';
 import {
   evidence,
@@ -22,6 +24,21 @@ import {
 } from '../knowledge/content';
 
 type Context = Record<string, string | number | boolean>;
+export function evaluateContext(predicate: Context, context: Context) {
+  const missing = new Set<string>();
+  const matches = Object.entries(predicate).every(([key, value]) => {
+    const range = key.endsWith('_min') || key.endsWith('_max');
+    const field = range ? key.slice(0, -4) : key;
+    if (!Object.hasOwn(context, field)) { missing.add(field); return true; }
+    const actual = context[field];
+    if (typeof actual !== (range ? 'number' : typeof value)) { missing.add(field); return true; }
+    return range
+      ? typeof actual === 'number' && typeof value === 'number' &&
+        (key.endsWith('_min') ? actual >= value : actual <= value)
+      : actual === value;
+  });
+  return { matches, missing: matches ? [...missing].sort() : [] };
+}
 export function matches(predicate: Context, context: Context) {
   return Object.entries(predicate).every(([key, value]) => {
     if (key.endsWith('_min') || key.endsWith('_max')) {
@@ -41,7 +58,19 @@ export class PolicyService {
   constructor(
     private readonly security: SecurityService,
     private readonly audit: AuditService,
+    private readonly clock: Clock,
   ) {}
+
+  async snapshotsMatchIn(tx: Prisma.TransactionClient, actor: Actor, checks: PolicyCheck[]) {
+    if (checks.length > 12) return false;
+    for (const check of checks) {
+      const parsed = policyCheckSchema.safeParse(check);
+      if (!parsed.success || !policyResolution.safeParse(parsed.data.result).success) return false;
+      const current = await this.resolveIn(tx, actor, parsed.data.input);
+      if (policyFingerprint(current) !== policyFingerprint(parsed.data.result)) return false;
+    }
+    return true;
+  }
 
   create(actor: Actor, input: z.infer<typeof policyInput>) {
     return this.security.scope(actor, true, async (tx) => {
@@ -123,7 +152,7 @@ export class PolicyService {
     actor: Actor,
     input: ResolveInput,
   ) {
-    const asOf = input.as_of ? new Date(input.as_of) : new Date();
+    const asOf = input.as_of ? new Date(input.as_of) : this.clock.now();
     const claims = await tx.policyClaim.findMany({
       where: {
         domain: input.domain,
@@ -172,7 +201,7 @@ export class PolicyService {
         (s.validUntil && s.validUntil <= asOf)
       )
         reason = 'OUTSIDE_VALIDITY_WINDOW';
-      else if (!matches(c.predicate as Context, input.context))
+      else if (!evaluateContext(c.predicate as Context, input.context).matches)
         reason = 'CONTEXT_NOT_MATCHED';
       if (reason) rejected.push({ claim_id: c.id, reason });
       return !reason;
@@ -226,26 +255,42 @@ export class PolicyService {
       }
       return true;
     });
-    const applicable = applicableClaims.map((c) => ({
+    const requiredContext = [...new Set(applicableClaims.flatMap((c) =>
+      evaluateContext(c.predicate as Context, input.context).missing,
+    ))].sort();
+    const completeClaims = applicableClaims.filter((c) =>
+      !evaluateContext(c.predicate as Context, input.context).missing.length,
+    );
+    const applicable = completeClaims.map((c) => ({
       claim_id: c.id,
       result: maskUsingChunks(c.result, [c.evidence]),
       authority: maskUsingChunks(c.authority, [c.evidence]),
       predicate: maskJsonUsingChunks(c.predicate, [c.evidence]),
+      valid_from: c.validFrom.toISOString(),
+      valid_until: c.validUntil?.toISOString() ?? null,
       evidence: evidence(c.evidence),
     }));
     const distinct = new Set(
-      applicableClaims.map((c) => JSON.stringify([c.result, c.authority])),
+      completeClaims.map((c) => JSON.stringify([c.result, c.authority])),
     );
     const status =
-      applicable.length === 0
+      requiredContext.length
+        ? ('NEEDS_CLARIFICATION' as const)
+        : applicable.length === 0
         ? ('INSUFFICIENT_EVIDENCE' as const)
         : distinct.size > 1
           ? ('NEEDS_REVIEW' as const)
           : ('SUPPORTED' as const);
     return {
       status,
+      required_context: requiredContext.map((field) => maskUsingChunks(field, applicableClaims.map((c) => c.evidence))),
       applicable,
-      rejected,
+      rejected: rejected.map((entry) => {
+        const claim = claims.find((c) => c.id === entry.claim_id)!;
+        return { ...entry, result: maskUsingChunks(claim.result, [claim.evidence]),
+          valid_from: claim.validFrom.toISOString(), valid_until: claim.validUntil?.toISOString() ?? null,
+          authority: maskUsingChunks(claim.authority, [claim.evidence]), evidence: evidence(claim.evidence) };
+      }),
       as_of: asOf.toISOString(),
       reason: status === 'NEEDS_REVIEW' ? 'CONFLICTING_APPROVED_CLAIMS' : null,
     };

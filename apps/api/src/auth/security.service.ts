@@ -122,7 +122,10 @@ export class SecurityService {
     const unique = [...new Set(chunkIds)];
     const chunks = await tx.sourceChunk.findMany({
       where: { id: { in: unique }, source: this.sourceWhere(actor, action) },
-      include: { source: true },
+      include: {
+        source: true,
+        claims: { select: { domain: true }, distinct: ['domain'], orderBy: { domain: 'asc' }, take: 31 },
+      },
     });
     if (chunks.length !== unique.length) throw new NotFoundException();
     return chunks;

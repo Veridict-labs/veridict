@@ -195,7 +195,7 @@ export function splitContent(content: string) {
   return chunks;
 }
 export function evidence(
-  chunk: SourceChunk & { source: KnowledgeSource },
+  chunk: SourceChunk & { source: KnowledgeSource; claims?: { domain: string }[] },
 ): Evidence & { redacted: boolean } {
   const source = chunk.source;
   const excerpt = maskPII(
@@ -206,6 +206,7 @@ export function evidence(
   return {
     source_id: source.id,
     chunk_id: chunk.id,
+    ...(chunk.claims ? { policy_domains: [...new Set(chunk.claims.map((c) => maskUsingChunks(c.domain, [chunk])))].sort() } : {}),
     title: maskUsingChunks(source.title, [chunk]),
     source_type: source.type,
     excerpt,
