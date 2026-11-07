@@ -50,3 +50,23 @@ A small Gemini Lite preflight returned HTTP 200. The older 2.5 Lite returned 404
 [Gemini Flash application run](evaluation/gemini-live-2026-11-06T12-13-03-584Z.json) returned HTTP 201 and persisted a safe INSUFFICIENT_EVIDENCE answer after support rejection. It did **not** pass the fuel amount acceptance check. Support checking was then corrected to include the same authorized tool observations/metadata available during drafting, with a separate 180000-character bound. Local regression passed. [The subsequent five-scenario attempt](evaluation/gemini-live-2026-11-06T12-15-03-878Z.json) stopped on the first case with AI_RATE_LIMITED (provider 429); the other four scenarios were not attempted. Cloud requests stopped at that point.
 
 The latest support-check change and full live suite remain unvalidated against the provider. Do not label Person 1 fully accepted. Check the project's actual rate/quota limits before a deliberate future live run. No billing upgrade or top-up was performed. See [current checkpoints](person-1-checkpoints.md).
+
+## Privacy-flow integration — 7 November 2026
+
+Validation used Node.js 24.21.0 and PostgreSQL 17/pgvector in an offline Linux container, using locally cached toolchains and dependencies. The container had no external network or credentials, a clean allowlisted environment, read-only source/toolchain mounts, and scratch-only writes. Limits were two CPUs, 1.5 GiB memory, 160 processes, a 1 GiB scratch filesystem, 64 MiB per file, 512 open files, and an eight-minute wall timeout. PostgreSQL and HTTP/MCP fixtures used only the container's isolated loopback namespace. Development services and their ports were not used.
+
+| Check | Result |
+| --- | --- |
+| Contracts, agent, API TypeScript compilation | Passed |
+| Frontend TypeScript check | Passed |
+| Backend ESLint | Passed |
+| Frontend Next/React/TypeScript lint rules with a portable Node resolver | Passed |
+| Agent tests | 36 passed, 0 failed, 0 skipped |
+| API tests | 52 passed, 0 failed, 0 skipped |
+| Git whitespace checks | Passed |
+
+The new regressions cover server-redacted history titles, READ revocation, bilingual personal-value intent and policy/definition/negation exclusions, explicit mobile/cell-number wording, email-versus-physical-address intent, backend-only personal-request completion, denied and ambiguous values, zero provider calls, audit correlation, grant revocation, owner/delegated identity isolation, and the production request limit. Each independent HTTP test resets throttler storage; the guard remains enabled and its limit has a separate assertion. Personal-data scenarios run before the existing fixture deliberately deactivates the employee.
+
+The existing test database lifecycle was adapted for the sandbox: committed migration SQL was applied with `psql` to a new temporary cluster, while the test harness's Docker lifecycle and Prisma migration invocation were mapped to that already prepared cluster. This validates the schema and application behavior, not Prisma's migration CLI or regeneration. The generated Prisma client was already available locally. Compilation preserved workspace symlinks to use the read-only vendor layout.
+
+The local install contains Windows native bindings. In the disposable frontend copy, lint kept the configured rules and used the JavaScript Node import resolver instead of the native TypeScript resolver; TypeScript separately checked module types. The original frontend lint configuration was not changed. A production Next.js bundle, browser interaction journeys, and the unmodified native resolver on Windows were not rerun in this sandbox. No dependency installation or cloud inference was performed. Real-model fuel acceptance, multilingual/injection evaluation, and the organizer suite remain pending as described above. See [the implemented privacy flow](privacy-flow.md).

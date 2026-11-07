@@ -65,6 +65,11 @@ export class AgentService {
       const inquiry = await this.inquiries.get(user, inquiryId);
       if (!['PENDING', 'NEEDS_REVALIDATION'].includes(inquiry.status))
         throw new ConflictException('Inquiry already completed');
+      if (inquiry.personal_data_request)
+        return await this.inquiries.completePersonalData(
+          { ...user, toolCallId: randomUUID() },
+          inquiryId,
+        );
       const { provider, model, modelId } = this.provider.create();
       const session = await this.auth.issueToolToken(user, inquiryId);
       agent = await this.auth.authenticate(session.access_token);

@@ -142,6 +142,8 @@ A human USER session must create the inquiry with an immutable `personal_data_re
 
 `POST /v1/sources/:id/personal-data` takes `{ inquiry_id, chunk_id }`; MCP `get_personal_data` takes `{ inquiry_id, source_id, chunk_id }`. Both require ownership, current source READ, a matching category/purpose grant, and exactly one complete distinct value of that category in the target chunk. They reveal that value only, never a whole unmasked excerpt. A source that has been replaced is ineligible. Missing/denied/ambiguous values share the unavailable result.
 
+The connected console also supports source-bound requests from its evidence drawer. For inquiries with an immutable `personal_data_request`, `POST /v1/inquiries/:id/run` performs a deterministic backend release under current authorization, without initializing a cloud model. See [the privacy flow](privacy-flow.md). Inquiry list responses now include server-redacted question text, so the browser does not need a persistent question cache.
+
 When reading the answer, only that exact authorized value may remain visible; other detected/tagged values remain masked. Grant revocation masks it on the next answer read, and base READ revocation hides the inquiry. Audit records contain category, purpose, source references, and hashes, not plaintext personal values. Policy, precedent, and reviewer metadata also redact known tagged values. Curated business directory contacts are intentionally published through their directory evidence ACL; private-profile access uses the separate disclosure path.
 
 ## Operations and verification

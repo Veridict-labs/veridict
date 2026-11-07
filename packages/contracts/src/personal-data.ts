@@ -51,6 +51,7 @@ export const personalDataRequest = z
     (v) => dataPurposes[v.field_type] === v.purpose,
     'Purpose does not match the requested field',
   );
+export type PersonalDataRequest = z.infer<typeof personalDataRequest>;
 export const personalDataAnnotation = z
   .strictObject({
     field_type: personalDataKind,

@@ -5,6 +5,7 @@ import { useSession } from '@/lib/session';
 import type { Citation, Evidence } from '@/lib/types';
 import { Icon } from './Icon';
 import { SourceStatePill, SourceTypeLabel, formatDate } from './ui';
+import { PersonalDataRequestForm } from './PersonalDataRequestForm';
 
 type Load =
   | { state: 'loading' }
@@ -115,6 +116,7 @@ export function EvidenceDrawer({
                   Personal data in this excerpt is masked.
                 </p>
               )}
+              {load.evidence.redacted && <PersonalDataRequestForm citation={citation} />}
 
               <dl className="mt-6 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
                 <Meta

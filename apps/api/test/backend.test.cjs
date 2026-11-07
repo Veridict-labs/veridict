@@ -1,4 +1,4 @@
-const { before, after, test } = require('node:test');
+const { before, beforeEach, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { execFileSync } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
@@ -24,6 +24,11 @@ const docker = (...args) =>
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: 60000,
   }).trim();
+beforeEach(() => {
+  // Each scenario gets its own request budget; the real guard stays enabled.
+  const { ThrottlerStorage } = require('@nestjs/throttler');
+  app.get(ThrottlerStorage).onApplicationShutdown();
+});
 async function request(
   route,
   token,
@@ -1802,6 +1807,89 @@ test('history titles are redacted on the server and removed after READ revocatio
   await db.permission.deleteMany({ where: { sourceId: source.source_id } });
   assert.equal((await request(`/v1/inquiries/${key}`, employee)).status, 404);
   assert.ok(!(await request('/v1/inquiries?limit=100', employee)).body.results.some((r) => r.inquiry_id === key));
+});
+
+test('inquiry run releases only a permitted personal value without calling a cloud model', async () => {
+  const { ModelProvider } = require('../dist/agent/model.provider');
+  const provider = app.get(ModelProvider);
+  const original = provider.create;
+  let calls = 0;
+  provider.create = () => { calls++; throw new Error('Personal data must not enter a cloud run'); };
+  try {
+    const phone = '+62 812-4444-5555';
+    const nik = '1234567890123456';
+    const source = await ingest({
+      type: 'DOCUMENT', title: 'Scoped contact', content: `Phone: ${phone}. NIK ${nik}.`,
+      permissions: [{ subject_type: 'USER', subject_id: employeeId }],
+    });
+    const target = { source_id: source.source_id, chunk_id: source.chunks[0].chunk_id };
+    const personal = { ...target, field_type: 'PHONE', purpose: 'CONTACT_PERSON' };
+    const create = async () => {
+      const r = await request('/v1/inquiries', employee, {
+        question: 'Can you tell me the mobile number?', personal_data_request: personal,
+      });
+      assert.equal(r.status, 201, JSON.stringify(r.body));
+      return r.body.inquiry_id;
+    };
+    const deniedId = await create();
+    const denied = await request(`/v1/inquiries/${deniedId}/run`, employee, {});
+    assert.equal(denied.status, 201, JSON.stringify(denied.body));
+    assert.equal(denied.body.status, 'INSUFFICIENT_EVIDENCE');
+    assert.doesNotMatch(JSON.stringify((await request(`/v1/inquiries/${deniedId}`, employee)).body), /4444-5555|1234567890123456/);
+    await request(`/v1/sources/${source.source_id}/personal-data-grants`, admin, {
+      grants: [{ field_type: 'PHONE', purpose: 'CONTACT_PERSON', subject_type: 'USER', subject_id: employeeId }],
+    }, 'PUT');
+    const key = await create();
+    assert.equal((await request(`/v1/inquiries/${key}/run`, outsider, {})).status, 404);
+    const token = (await request('/v1/auth/tool-token', employee, { inquiry_id: key })).body.access_token;
+    assert.equal((await request(`/v1/inquiries/${key}/run`, token, {})).status, 403);
+    const result = await request(`/v1/inquiries/${key}/run`, employee, {});
+    assert.equal(result.status, 201, JSON.stringify(result.body));
+    assert.equal(result.body.status, 'ANSWERED');
+    assert.equal(result.body.model_calls, 0);
+    const opened = (await request(`/v1/inquiries/${key}`, employee)).body;
+    assert.equal(opened.answer, phone);
+    assert.deepEqual(opened.personal_data_request, personal);
+    assert.doesNotMatch(JSON.stringify(opened.citations), /4444-5555|1234567890123456/);
+    assert.equal((await request(`/v1/inquiries/${key}/run`, employee, {})).status, 409);
+    await request(`/v1/sources/${source.source_id}/personal-data-grants`, admin, { grants: [] }, 'PUT');
+    assert.doesNotMatch((await request(`/v1/inquiries/${key}`, employee)).body.answer, /4444-5555/);
+    const logs = await db.auditEvent.findMany({ where: { inquiryId: key } });
+    assert.ok(logs.some((e) => e.eventType === 'PERSONAL_DATA_DISCLOSED' && e.toolCallId));
+    assert.doesNotMatch(JSON.stringify(logs), /4444-5555|1234567890123456/);
+    assert.equal(calls, 0);
+    await db.permission.deleteMany({ where: { sourceId: source.source_id } });
+    assert.equal((await request(`/v1/inquiries/${key}`, employee)).status, 404);
+  } finally { provider.create = original; }
+});
+
+test('inquiry run never releases an ambiguous personal value even with a grant', async () => {
+  const source = await ingest({
+    type: 'DOCUMENT', title: 'Ambiguous contact',
+    content: 'Contact +62 812-3333-4444 or +62 813-5555-6666.',
+    permissions: [{ subject_type: 'USER', subject_id: employeeId }],
+  });
+  await request(`/v1/sources/${source.source_id}/personal-data-grants`, admin, {
+    grants: [{ field_type: 'PHONE', purpose: 'CONTACT_PERSON', subject_type: 'USER', subject_id: employeeId }],
+  }, 'PUT');
+  const created = await request('/v1/inquiries', employee, {
+    question: 'Tampilkan nomor telepon PIC',
+    personal_data_request: { source_id: source.source_id, chunk_id: source.chunks[0].chunk_id, field_type: 'PHONE', purpose: 'CONTACT_PERSON' },
+  });
+  const key = created.body.inquiry_id;
+  const result = await request(`/v1/inquiries/${key}/run`, employee, {});
+  assert.equal(result.status, 201, JSON.stringify(result.body));
+  assert.equal(result.body.status, 'INSUFFICIENT_EVIDENCE');
+  assert.doesNotMatch(JSON.stringify((await request(`/v1/inquiries/${key}`, employee)).body), /3333-4444|5555-6666/);
+});
+
+test('inquiry run keeps the production request limit enabled', async () => {
+  const created = await request('/v1/inquiries', employee, { question: 'Rate limit fixture' });
+  assert.equal(created.status, 201);
+  const route = `/v1/inquiries/${created.body.inquiry_id}/run`;
+  for (let attempt = 0; attempt < 10; attempt++)
+    assert.equal((await request(route, outsider, {})).status, 404);
+  assert.equal((await request(route, outsider, {})).status, 429);
 });
 
 test('last admin protection and deactivation revoke user and agent sessions immediately', async () => {

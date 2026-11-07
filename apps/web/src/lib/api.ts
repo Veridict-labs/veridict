@@ -6,6 +6,7 @@ import type {
   InquirySummary,
   Me,
   PendingFeedback,
+  PersonalDataRequest,
   TraceEvent,
 } from './types';
 
@@ -28,7 +29,7 @@ export interface VeridictClient {
   listInquiries(): Promise<InquirySummary[]>;
   getInquiry(id: string): Promise<Inquiry>;
   /** Creates an inquiry and asks the agent to process it. Returns the inquiry id. */
-  ask(question: string): Promise<string>;
+  ask(question: string, personalDataRequest?: PersonalDataRequest): Promise<string>;
   run(id: string): Promise<void>;
   trace(id: string): Promise<TraceEvent[]>;
   evidence(sourceId: string, chunkId: string): Promise<Evidence>;
@@ -101,10 +102,13 @@ export function liveClient(token: string): VeridictClient {
       return page.results;
     },
     getInquiry: (id) => call<Inquiry>(`/v1/inquiries/${id}`),
-    async ask(question) {
+    async ask(question, personalDataRequest) {
       const created = await call<{ inquiry_id: string }>('/v1/inquiries', {
         method: 'POST',
-        body: { question },
+        body: {
+          question,
+          ...(personalDataRequest ? { personal_data_request: personalDataRequest } : {}),
+        },
       });
       return created.inquiry_id;
     },

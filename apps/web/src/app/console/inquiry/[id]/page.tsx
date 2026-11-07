@@ -33,31 +33,42 @@ export default function InquiryPage() {
   const { client } = useSession();
   const [inquiry, setInquiry] = useState<Inquiry | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [running, setRunning] = useState(false);
+  const [runningId, setRunningId] = useState<string | null>(null);
+  const running = runningId === id;
   const [open, setOpen] = useState<Citation | null>(null);
-  const started = useRef(false);
+  const started = useRef<{ id: string; client: typeof client } | null>(null);
+  const active = useRef<{ id: string; client: typeof client } | null>(null);
 
-  const load = useCallback(async () => {
-    if (!client) return;
+  const load = useCallback(async (preserveError = false) => {
+    if (!client) return false;
     try {
       const next = await client.getInquiry(id);
+      if (active.current?.id !== id || active.current.client !== client) return false;
       setInquiry(next);
+      setOpen(null);
+      if (!preserveError) setError(null);
+      return true;
     } catch (e) {
+      if (active.current?.id !== id || active.current.client !== client) return false;
+      setInquiry(null);
+      setOpen(null);
       setError(
         e instanceof ApiError && e.status === 404
           ? 'This question is not available.'
           : 'Could not load this question.',
       );
+      return false;
     }
   }, [client, id]);
 
   const run = useCallback(async () => {
     if (!client) return;
-    setRunning(true);
+    setRunningId(id);
     setError(null);
     try {
       await client.run(id);
     } catch (e) {
+      if (active.current?.id !== id || active.current.client !== client) return;
       setError(
         e instanceof ApiError && e.status === 429
           ? 'The AI provider is rate-limited right now. Try again in a minute.'
@@ -66,27 +77,28 @@ export default function InquiryPage() {
             : 'The agent could not finish.',
       );
     } finally {
-      setRunning(false);
-      await load();
+      setRunningId((current) => current === id ? null : current);
+      await load(true);
     }
   }, [client, id, load]);
 
   useEffect(() => {
-    if (started.current || !client) return;
-    started.current = true;
+    active.current = { id, client };
+    if (!client || (started.current?.id === id && started.current.client === client)) return;
+    started.current = { id, client };
     let shouldRun = false;
     try {
       shouldRun = sessionStorage.getItem(RUN_FLAG(id)) === '1';
       sessionStorage.removeItem(RUN_FLAG(id));
     } catch {}
-    void load().then(() => {
-      if (shouldRun) void run();
+    void load().then((loaded) => {
+      if (loaded && shouldRun) void run();
     });
   }, [client, id, load, run]);
 
   const closeDrawer = useCallback(() => setOpen(null), []);
 
-  if (!inquiry)
+  if (!inquiry || inquiry.inquiry_id !== id)
     return (
       <div className="mx-auto max-w-4xl">
         <Breadcrumb />
@@ -382,7 +394,7 @@ function Outcome({
   const { client } = useSession();
   const askAgain = async () => {
     if (!client) return;
-    const id = await client.ask(inquiry.question);
+    const id = await client.ask(inquiry.question, inquiry.personal_data_request ?? undefined);
     try {
       sessionStorage.setItem(RUN_FLAG(id), '1');
     } catch {}
