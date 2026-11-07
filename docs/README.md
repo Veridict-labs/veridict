@@ -11,6 +11,7 @@ Start with the [project README](../README.md) for the product walkthrough, recor
 | [Accountability](accountability.md) | Accessible data, autonomous behavior, human authority, prohibited actions and limits |
 | [Answer modes](answer-modes.md) | AI on/off, excerpts, demo distinction and migration |
 | [Backend integration](backend.md) | Authentication, REST/MCP, ingestion, grants and review |
+| [Vercel frontend deployment](vercel.md) | Workspace build order, Vercel settings and API configuration |
 | [Gemini runtime](gemini.md) | Primary provider configuration, safe errors and live evaluation |
 | [Hugging Face runtime](huggingface.md) | Explicit alternative provider and known quota constraints |
 | [Synthetic demo fixtures](demo-fixtures.md) | Actors, source aliases, scenarios, seed and expected outcomes |
