@@ -5,7 +5,6 @@ import {
 } from '@nestjs/common';
 import {
   personalDataRequest,
-  type PersonalDataKind,
   type personalDataGrant,
 } from '@veridict/contracts';
 import type { Inquiry, Prisma } from '../generated/prisma/client';
@@ -14,36 +13,12 @@ import { SecurityService } from '../auth/security.service';
 import { AuditService, digest } from '../audit/audit.service';
 import { personalDataSpans, readPersonalDataSpans } from '../knowledge/content';
 import type { z } from 'zod';
+import { explicitlyRequests } from './personal-data.intent';
+
+export { explicitlyRequests } from './personal-data.intent';
 
 type Request = z.infer<typeof personalDataRequest>;
 type Grant = z.infer<typeof personalDataGrant>;
-const terms: Record<PersonalDataKind, RegExp> = {
-  NIK: /\bnik\b|national\s+(?:id|identity)|nomor\s+induk\s+kependudukan/i,
-  PHONE:
-    /nomor\s+(?:telepon|telpon|hp)|phone\s+number|telephone\s+number|contact\s+number/i,
-  EMAIL: /e-?mail|surel/i,
-  ADDRESS: /\balamat\b|\baddress\b/i,
-  DATE_OF_BIRTH: /tanggal\s+lahir|tgl\s+lahir|date\s+of\s+birth|\bdob\b/i,
-  BANK_ACCOUNT: /rekening|bank\s+account/i,
-  NAME: /\bnama\b|\bname\b/i,
-  NPWP: /\bnpwp\b|tax\s+(?:id|number)/i,
-  PASSPORT_NUMBER: /paspor|passport/i,
-  SALARY: /\bgaji\b|\bsalary\b/i,
-  HEALTH_INFORMATION: /kesehatan|diagnos(?:is|a)|health|medical/i,
-};
-export function explicitlyRequests(question: string, field: PersonalDataKind) {
-  if (
-    /\b(jangan|tanpa|sembunyikan|without|hide|mask)\b|\bdo\s+not\b|\bdon['’]t\b/i.test(
-      question,
-    )
-  )
-    return false;
-  return (
-    /\b(berapa|apa|tampilkan|lihat|sebutkan|minta|berikan|show|provide|display|retrieve|give|what|tell)\b/i.test(
-      question,
-    ) && terms[field].test(question)
-  );
-}
 
 @Injectable()
 export class PersonalDataService {

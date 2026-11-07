@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { AskBox } from '@/components/AskBox';
 import { Icon } from '@/components/Icon';
 import { StatusBadge, cx, formatDate, statusInfo } from '@/components/ui';
-import { questionCache, useSession } from '@/lib/session';
+import { useSession } from '@/lib/session';
 import type { InquiryStatus, InquirySummary } from '@/lib/types';
 
 const ATTENTION: InquiryStatus[] = [
@@ -36,14 +36,7 @@ export default function ConsoleHome() {
     client
       .listInquiries()
       .then((rows) =>
-        setItems(
-          rows
-            .map((r) => ({
-              ...r,
-              question: r.question ?? questionCache.get(r.inquiry_id),
-            }))
-            .sort((a, b) => b.created_at.localeCompare(a.created_at)),
-        ),
+        setItems(rows.sort((a, b) => b.created_at.localeCompare(a.created_at))),
       )
       .catch((e) =>
         setError(

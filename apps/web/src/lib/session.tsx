@@ -24,6 +24,12 @@ type SessionState = {
 const KEY = 'vd-session';
 const Ctx = createContext<SessionState | null>(null);
 
+function clearLegacyQuestions() {
+  try {
+    localStorage.removeItem('vd-questions');
+  } catch {}
+}
+
 function read(): Stored | null {
   try {
     const raw = sessionStorage.getItem(KEY);
@@ -45,6 +51,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [me, setMe] = useState<Me | null>(null);
 
   const activate = useCallback(async (stored: Stored) => {
+    clearLegacyQuestions();
     const next =
       stored.mode === 'demo' ? demoClient() : liveClient(stored.token);
     const profile = await next.me();
@@ -56,6 +63,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     // Restore a saved session once; all state updates happen after the awaited profile call.
     const restore = async () => {
+      clearLegacyQuestions();
       const stored = read();
       try {
         if (stored) await activate(stored);
@@ -78,10 +86,14 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       },
       startDemo: () => activate({ mode: 'demo' }),
       async signOut() {
-        await client?.logout();
-        write(null);
-        setClient(null);
-        setMe(null);
+        try {
+          await client?.logout();
+        } finally {
+          clearLegacyQuestions();
+          write(null);
+          setClient(null);
+          setMe(null);
+        }
       },
     }),
     [ready, client, me, activate],
@@ -95,21 +107,3 @@ export function useSession() {
   if (!ctx) throw new Error('useSession must be used inside SessionProvider');
   return ctx;
 }
-
-/** The list endpoint returns ids only, so the UI remembers questions it asked. */
-export const questionCache = {
-  get(id: string): string | undefined {
-    try {
-      return JSON.parse(localStorage.getItem('vd-questions') ?? '{}')[id];
-    } catch {
-      return undefined;
-    }
-  },
-  set(id: string, question: string) {
-    try {
-      const all = JSON.parse(localStorage.getItem('vd-questions') ?? '{}');
-      all[id] = question;
-      localStorage.setItem('vd-questions', JSON.stringify(all));
-    } catch {}
-  },
-};

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { Icon } from '@/components/Icon';
 import { Button, Pill, cx, formatDate } from '@/components/ui';
-import { questionCache, useSession } from '@/lib/session';
+import { useSession } from '@/lib/session';
 import type { FeedbackAction, PendingFeedback } from '@/lib/types';
 
 const ACTION: Record<
@@ -137,7 +137,7 @@ function ReviewCard({
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState<'VALIDATED' | 'REJECTED' | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const question = item.question ?? questionCache.get(item.inquiry_id);
+  const question = item.question;
   const a = ACTION[item.action];
 
   const decide = async (decision: 'VALIDATED' | 'REJECTED') => {

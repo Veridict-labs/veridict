@@ -7,9 +7,9 @@ import {
 import type { Actor } from '../auth/actor';
 import { SecurityService } from '../auth/security.service';
 import { AuditService, digest } from '../audit/audit.service';
-import { evidence, maskPII, maskUsingChunks } from '../knowledge/content';
+import { evidence, maskUsingChunks } from '../knowledge/content';
 import type { AnswerInput, InquiryInput } from '@veridict/contracts';
-import { answerInput } from '@veridict/contracts';
+import { answerInput, personalDataRequest } from '@veridict/contracts';
 import type { Prisma } from '../generated/prisma/client';
 import { EscalationsService } from '../escalations/escalations.service';
 import { PersonalDataService } from '../personal-data/personal-data.service';
@@ -157,12 +157,14 @@ export class InquiriesService {
       const structured = inquiry.structuredAnswer
         ? answerInput.parse(inquiry.structuredAnswer)
         : null;
+      const request = personalDataRequest.safeParse(inquiry.personalDataRequest);
       const safeStatement = (value: AnswerInput['official_truth']) =>
         value ? { ...value, statement: redact(value.statement) } : null;
       await this.audit.record(tx, actor, 'INQUIRY_OPENED', [inquiry.id]);
       return {
         inquiry_id: inquiry.id,
-        question: maskPII(inquiry.question),
+        personal_data_request: request.success ? request.data : null,
+        question: redact(inquiry.question),
         status: inquiry.status,
         escalation:
           !stale &&
@@ -200,6 +202,67 @@ export class InquiriesService {
       };
     });
   }
+  completePersonalData(actor: Actor, inquiryId: string) {
+    actor = this.security.forInquiry(actor, inquiryId);
+    if (actor.sessionKind !== 'USER') throw new ForbiddenException();
+    // One transaction serializes permission changes with authorization and persistence.
+    // Raw values never enter a model prompt, tool observation, or provider response.
+    return this.security.scope(actor, true, async (tx) => {
+      const inquiry = await this.visible(tx, actor, inquiryId);
+      if (!['PENDING', 'NEEDS_REVALIDATION'].includes(inquiry.status))
+        throw new ConflictException('Inquiry already completed');
+      const request = personalDataRequest.safeParse(inquiry.personalDataRequest);
+      if (!request.success) throw new NotFoundException();
+      const value = await this.personalData.authorizedValue(tx, actor, inquiry);
+      const input = answerInput.parse({
+        status: value ? 'ANSWERED' : 'INSUFFICIENT_EVIDENCE',
+        answer: value
+          ? value.value
+          : /\b(apa|berapa|tampilkan|lihat|sebutkan|minta|berikan)\b/i.test(inquiry.question)
+            ? 'Informasi yang dapat diakses belum cukup untuk menjawab pertanyaan ini.'
+            : 'The accessible information is insufficient to answer this question.',
+        citations: value
+          ? [{ source_id: value.source_id, chunk_id: value.chunk_id }]
+          : [],
+      });
+      const organization = await tx.organization.findUniqueOrThrow({
+        where: { id: actor.orgId },
+      });
+      await tx.inquiry.update({
+        where: { id: inquiryId },
+        data: {
+          status: input.status,
+          answer: input.answer,
+          assumptions: input.assumptions,
+          limitations: input.limitations,
+          permissionVersion: organization.permissionVersion,
+          structuredAnswer: input,
+          escalationDomain: null,
+        },
+      });
+      await this.audit.record(
+        tx,
+        actor,
+        value ? 'PERSONAL_DATA_DISCLOSED' : 'PERSONAL_DATA_UNAVAILABLE',
+        [request.data.source_id, request.data.chunk_id],
+        value ? 'ALLOWED' : 'UNAVAILABLE',
+        {
+          field_type: request.data.field_type,
+          purpose: request.data.purpose,
+          ...(value ? { value_hash: digest(value.value) } : {}),
+        },
+      );
+      await this.audit.record(tx, actor, 'INQUIRY_ANSWERED', [inquiryId], input.status, {
+        answer_hash: digest(input.answer),
+      });
+      return {
+        inquiry_id: inquiryId,
+        status: input.status,
+        execution: 'AUTHORIZED_PERSONAL_DATA',
+        model_calls: 0,
+      };
+    });
+  }
   list(actor: Actor, limit: number, cursor?: string) {
     return this.security.scope(actor, false, async (tx) => {
       const rows = await tx.inquiry.findMany({
@@ -213,11 +276,20 @@ export class InquiriesService {
         orderBy: { id: 'asc' },
         take: limit,
         ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-        select: { id: true, status: true, createdAt: true },
+        select: {
+          id: true,
+          status: true,
+          createdAt: true,
+          question: true,
+          evidence: {
+            select: { chunk: { select: { content: true, personalDataSpans: true } } },
+          },
+        },
       });
       return {
         results: rows.map((r) => ({
           inquiry_id: r.id,
+          question: maskUsingChunks(r.question, r.evidence.map((e) => e.chunk)),
           status: r.status,
           created_at: r.createdAt,
         })),
