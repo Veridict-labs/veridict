@@ -111,6 +111,7 @@ export class InquiriesService {
           orgId: actor.orgId,
           askerId: actor.id,
           question,
+          processingMode: input.processing_mode ?? 'ai',
           personalDataRequest: input.personal_data_request,
           evidence: target ? { create: { chunkId: target.id } } : undefined,
           permissionVersion: organization.permissionVersion,
@@ -127,6 +128,7 @@ export class InquiriesService {
       );
       return {
         inquiry_id: inquiry.id,
+        processing_mode: inquiry.processingMode,
         status: inquiry.status,
         orchestration: 'AWAITING_AGENT',
         created_at: inquiry.createdAt,
@@ -178,6 +180,7 @@ export class InquiriesService {
       await this.audit.record(tx, actor, 'INQUIRY_OPENED', [inquiry.id]);
       return {
         inquiry_id: inquiry.id,
+        processing_mode: inquiry.processingMode,
         personal_data_request: request.success ? request.data : null,
         question: redact(inquiry.question),
         status: inquiry.status,

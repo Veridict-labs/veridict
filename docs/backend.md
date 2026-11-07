@@ -2,6 +2,8 @@
 
 This guide describes the Person 2 backend. Request schemas and TypeScript types are exported from `@veridict/contracts`. Enums are uppercase. Input objects reject unknown fields, including model-supplied actor identities. Business endpoints require `Authorization: Bearer <access_token>` unless marked public.
 
+Inquiry answer modes are the lowercase values `ai` and `no_ai`. Set `processing_mode` when creating an inquiry; omission defaults to `ai`. The mode is persisted, returned by inquiry creation/detail, and used by the existing owner-only `/run` endpoint. See [answer modes](answer-modes.md).
+
 ## Authentication
 
 `POST /v1/auth/login` accepts `{ "org_slug": "veridict", "email": "admin@example.com", "password": "your chosen password" }` and returns `access_token`, `token_type`, and `expires_at`. User sessions last eight hours; agent sessions last fifteen minutes. Tokens are random 256-bit secrets; only their SHA-256 hashes are stored. Passwords use salted scrypt. Login is limited to ten attempts per minute per IP; other routes have an in-memory limit of 1,000 requests per minute per IP.

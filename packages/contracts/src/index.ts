@@ -198,8 +198,11 @@ export const personalDataInput = z.strictObject({
   source_id: id,
   chunk_id: id,
 });
+export const processingMode = z.enum(['ai', 'no_ai']);
+export type ProcessingMode = z.infer<typeof processingMode>;
 export const inquiryInput = z.strictObject({
   question: text.max(4000),
+  processing_mode: processingMode.optional(),
   personal_data_request: personalDataRequest.optional(),
 });
 export const citationSchema = z.strictObject({ source_id: id, chunk_id: id });

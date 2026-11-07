@@ -1,5 +1,5 @@
 // Mirrors the API response shapes in apps/api (inquiries, knowledge, feedback).
-export type { PersonalDataRequest } from '@veridict/contracts';
+export type { PersonalDataRequest, ProcessingMode } from '@veridict/contracts';
 import type { PersonalDataRequest } from '@veridict/contracts';
 
 export type Role = 'EMPLOYEE' | 'REVIEWER' | 'ADMIN';
@@ -55,6 +55,7 @@ export type Escalation = {
 } | null;
 
 export type Inquiry = {
+  processing_mode?: 'ai' | 'no_ai';
   personal_data_request?: PersonalDataRequest | null;
   inquiry_id: string;
   question: string;

@@ -279,6 +279,66 @@ test('lexical retrieval returns only visible evidence and masks personal data', 
   assert.equal(response.body.results[0].redacted, true);
   assert.equal(response.headers.get('cache-control'), 'no-store');
 });
+test('AI-off inquiries answer real authorized evidence, persist mode and never initialize a model', async () => {
+  const { ModelProvider } = require('../dist/agent/model.provider');
+  const provider = app.get(ModelProvider);
+  const original = provider.create;
+  let calls = 0;
+  provider.create = () => { calls++; throw new Error('AI off must never initialize inference'); };
+  try {
+    const created = await request('/v1/inquiries', employee, {
+      question: 'What is the fuel allowance?', processing_mode: 'no_ai',
+    });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    const key = created.body.inquiry_id;
+    assert.equal(created.body.processing_mode, 'no_ai');
+    assert.equal((await request(`/v1/inquiries/${key}/run`, outsider, {})).status, 404);
+    const delegated = (await request('/v1/auth/tool-token', employee, { inquiry_id: key })).body.access_token;
+    assert.equal((await request(`/v1/inquiries/${key}/run`, delegated, {})).status, 403);
+    const result = await request(`/v1/inquiries/${key}/run`, employee, {});
+    assert.equal(result.status, 201, JSON.stringify(result.body));
+    assert.equal(result.body.status, 'ANSWERED');
+    assert.equal(result.body.model_calls, 0);
+    assert.equal(result.body.provider, null);
+    const opened = (await request(`/v1/inquiries/${key}`, employee)).body;
+    assert.equal(opened.processing_mode, 'no_ai');
+    assert.match(opened.answer, /Fuel allowance reimbursement Rp500000/);
+    assert.doesNotMatch(JSON.stringify(opened), /1234567890123456|812-3456/);
+    assert.ok(opened.citations.some((c) => c.source_id === document.source_id));
+    assert.equal(opened.official_truth, null);
+    const trace = (await request(`/v1/inquiries/${key}/trace`, employee)).body.results;
+    assert.ok(trace.some((e) => e.event_type === 'NO_AI_RUN_COMPLETED' && e.metadata.model_calls === 0));
+    assert.ok(!trace.some((e) => e.event_type.startsWith('AI_')));
+    assert.equal((await request(`/v1/inquiries/${key}/run`, employee, {})).status, 409);
+    const source = await ingest({ type: 'DOCUMENT', title: 'Scoped no-AI fixture',
+      content: 'uniquenoaifixturetoken value', permissions: [{ subject_type: 'USER', subject_id: employeeId }] });
+    const scoped = await request('/v1/inquiries', employee, { question: 'uniquenoaifixturetoken', processing_mode: 'no_ai' });
+    const scopedId = scoped.body.inquiry_id;
+    assert.equal((await request(`/v1/inquiries/${scopedId}/run`, employee, {})).body.status, 'ANSWERED');
+    await request(`/v1/sources/${source.source_id}/permissions`, admin, { permissions: [] }, 'PUT');
+    assert.equal((await request(`/v1/inquiries/${scopedId}`, employee)).status, 404);
+    assert.equal(calls, 0);
+  } finally { provider.create = original; }
+});
+
+test('AI-off restricted and missing questions abstain identically and mode input is validated', async () => {
+  const answers = [];
+  for (const question of ['Kenari', 'uniquenoaimissingtoken', 'apa saya?']) {
+    const created = await request('/v1/inquiries', employee, { question, processing_mode: 'no_ai' });
+    const key = created.body.inquiry_id;
+    const run = await request(`/v1/inquiries/${key}/run`, employee, {});
+    assert.equal(run.status, 201, JSON.stringify(run.body));
+    assert.equal(run.body.status, 'INSUFFICIENT_EVIDENCE');
+    const opened = (await request(`/v1/inquiries/${key}`, employee)).body;
+    assert.deepEqual(opened.citations, []);
+    answers.push(opened.answer);
+  }
+  assert.equal(answers[0], answers[1]);
+  assert.equal((await request('/v1/inquiries', employee, { question: 'Fuel', processing_mode: 'unknown' })).status, 400);
+  const legacy = await request('/v1/inquiries', employee, { question: 'Fuel' });
+  assert.equal(legacy.body.processing_mode, 'ai');
+});
+
 test('restricted and nonexistent search results are indistinguishable', async () => {
   const authorized = await request('/v1/knowledge/search', admin, {
     query: 'Kenari',
